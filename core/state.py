@@ -10,4 +10,5 @@ class GitState:
     branches: list = field(default_factory=list)
     commitHistory: list = field(default_factory=list)
     fileStatuses: dict = field(default_factory=dict)
+    canUndo: bool = False
     

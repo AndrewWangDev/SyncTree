@@ -1,5 +1,6 @@
 import webbrowser
 import re
+from PySide6.QtCore import QThread, Signal
 from core.git_utils import GitPoller
 
 class GitActions:
@@ -7,8 +8,6 @@ class GitActions:
         self.poller = poller
 
     def run_cmd(self, args, get_stderr=False):
-        # reuse poller's internal git runner but wait for it
-        # Actually better to redefine it to capture stderr if needed
         import subprocess, os
         repo_path = self.poller.repo_path
         if not repo_path or not os.path.exists(repo_path):
@@ -52,15 +51,26 @@ class GitActions:
             return self.run_cmd(["remote", "add", "origin", url])
 
     def sync_latest(self):
-        branch = self.poller.current_state.currentBranch if self.poller.current_state and self.poller.current_state.currentBranch else "main"
-        out, err = self.run_cmd(["checkout", branch])
-        if err is not None: return None, err
-        return self.run_cmd(["pull", "origin", branch])
+        # User specified: Remote is always main.
+        return self.run_cmd(["pull", "origin", "main"])
 
     def create_branch(self, name, commit_hash=None):
         if commit_hash:
             return self.run_cmd(["checkout", "-b", name, commit_hash])
         return self.run_cmd(["checkout", "-b", name])
+
+    def is_valid_branch_name(self, name):
+        if not name or not name.strip():
+            return False, "Branch name cannot be empty"
+        # git check-ref-format --branch <name>
+        # returns 0 if valid, non-zero if invalid
+        out, err = self.run_cmd(["check-ref-format", "--branch", name])
+        if err:
+            return False, f"Invalid branch name: {name}\n(No spaces, no '..', no special symbols like ~^:?*)"
+        return True, None
+
+    def switch_branch(self, name):
+        return self.run_cmd(["checkout", name])
 
     def stage_all(self):
         return self.run_cmd(["add", "."])
@@ -93,3 +103,21 @@ class GitActions:
         args.append("--")
         args.append(file_path)
         return self.run_cmd(args)
+
+    def cleanup_garbage(self):
+        # git clean -fd removes untracked files/directories
+        # git gc runs garbage collection
+        out1, err1 = self.run_cmd(["clean", "-fd"])
+        out2, err2 = self.run_cmd(["gc"])
+        return (out1 or "") + (out2 or ""), (err1 or err2)
+
+class CleanupThread(QThread):
+    finished = Signal(str, str) # result_msg, error_msg
+
+    def __init__(self, actions, parent=None):
+        super().__init__(parent)
+        self.actions = actions
+
+    def run(self):
+        out, err = self.actions.cleanup_garbage()
+        self.finished.emit(out, err)

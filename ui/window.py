@@ -1,6 +1,6 @@
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSplitter, QTreeView, QFileSystemModel
+from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSplitter, QTreeView, QFileSystemModel, QMenu
 from PySide6.QtGui import QIcon, QCursor, QPainter, QPixmap, QColor, QPen
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QEvent
 import os
 import sys
 import ctypes
@@ -15,11 +15,12 @@ if os.name == 'nt':
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("andrewwang.synctree.beta.1")
 
 from core.git_utils import GitPoller
-from core.git_actions import GitActions
+from core.git_actions import GitActions, CleanupThread
 from core.i18n import lang_manager, tr
 from ui.theme import QSS, COLORS
 from ui.graph_view import GraphView
 from ui.panel_view import PanelView
+from ui.components.buttons import MaterialButton, AnimatedLogo
 from ui.components.toast import ToastLabel
 from ui.components.modals import ModalOverlay, show_input_modal, show_history_branch_modal, show_diag_modal, show_about_modal, show_search_results_modal, show_result_modal
 from PySide6.QtWidgets import QLineEdit
@@ -69,22 +70,37 @@ class GitFileModel(QFileSystemModel):
         state = self.main_window.current_state
         if not state or not state.isRepo: return None
         
-        # Build normalized dictionary specifically for case-insensitive Windows match
-        fileStatuses_nc = {os.path.normcase(k): v for k, v in state.fileStatuses.items()}
+        # 1. Standardize both to real absolute paths
+        file_real = os.path.realpath(file_path).replace('\\', '/').lower()
+        repo_real = os.path.realpath(self.main_window.poller.repo_path).replace('\\', '/').lower()
         
-        file_path_nc = os.path.normcase(os.path.normpath(file_path))
-        
-        if file_path_nc in fileStatuses_nc:
-            return fileStatuses_nc[file_path_nc]
+        # 2. Try direct absolute realpath match (Matches absolute physical ID)
+        if file_real in state.fileStatuses:
+            return state.fileStatuses[file_real]
             
-        curr = file_path_nc
-        repo_path_nc = os.path.normcase(os.path.normpath(self.main_window.poller.repo_path))
-        while curr and len(curr) > 3 and curr != repo_path_nc:
-            curr = os.path.dirname(curr)
-            if curr in fileStatuses_nc:
-                parent_status = fileStatuses_nc[curr]
-                if parent_status in ('untracked', 'ignored'):
-                    return parent_status
+        # 3. Try relative path match (Matches logical Git path)
+        try:
+            rel = os.path.relpath(file_real, repo_real).replace('\\', '/').lower().strip('/')
+            if rel == '.' or rel == '': rel = ""
+            if rel and rel in state.fileStatuses:
+                return state.fileStatuses[rel]
+        except:
+            rel = ""
+            
+        # 4. Aggressive Match for README (Handles root-level junction/case ghosting)
+        name = os.path.basename(file_path).lower()
+        if name == "readme.md":
+            for k, v in state.fileStatuses.items():
+                if k.endswith("readme.md"): return v
+            
+        # 5. Parent check (for folders)
+        curr = file_real
+        while len(curr) > len(repo_real):
+            curr = os.path.dirname(curr).replace('\\', '/').lower()
+            if curr in state.fileStatuses:
+                p_st = state.fileStatuses[curr]
+                if p_st in ('untracked', 'ignored'):
+                    return p_st
         return 'clean'
 
 class MainWindow(QMainWindow):
@@ -92,7 +108,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("SyncTree (Beta)")
         self.setWindowIcon(QIcon(get_resource_path("logo.png")))
-        self.resize(800, 700)
+        self.resize(800, 820)
         self.setStyleSheet(QSS)
         
         self.poller = GitPoller()
@@ -190,6 +206,14 @@ class MainWindow(QMainWindow):
         self.lbl_branch.setFixedHeight(32)
         self.lbl_branch.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLORS['primary']}; background: {COLORS['surface_variant']}; padding: 0 12px; border-radius: 8px;")
         header_layout.addWidget(self.lbl_branch)
+        
+        self.btn_switch = QPushButton("⇄")
+        self.btn_switch.setFixedSize(24, 24)
+        self.btn_switch.setToolTip(tr("switch_branch"))
+        self.btn_switch.setStyleSheet(f"QPushButton {{ border: none; background: transparent; color: {COLORS['primary']}; font-size: 16px; font-weight: bold; padding: 0; }} QPushButton:hover {{ color: {COLORS['text']}; }}")
+        self.btn_switch.clicked.connect(self._switch_branch)
+        header_layout.addWidget(self.btn_switch)
+        
         header_layout.addSpacing(16)
         
         header_layout.addLayout(right_layout)
@@ -211,30 +235,50 @@ class MainWindow(QMainWindow):
         self.file_tree.setModel(self.file_model)
         self.file_tree.setStyleSheet(f"background-color: {COLORS['surface']}; color: {COLORS['text']}; border: none; border-radius: 8px; padding: 4px;")
         self.file_tree.setHeaderHidden(True)
+        self.file_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         for i in range(1, 4):
             self.file_tree.hideColumn(i)
         self.file_tree.doubleClicked.connect(self._open_file)
         self.file_tree.clicked.connect(self._on_file_clicked)
+        self.file_tree.customContextMenuRequested.connect(self._show_context_menu)
             
         right_layout.addWidget(self.file_tree, stretch=1)
         
         from PySide6.QtWidgets import QListWidget, QListWidgetItem, QSizePolicy
         legend_layout = QVBoxLayout()
         legend_layout.setContentsMargins(4, 4, 4, 4)
-        def make_legend(color, text):
-            return QLabel(f'<span style="color:{color}; font-size:16px;">●</span> <span style="font-size:12px; color:{COLORS["text"]};">{text}</span>')
-        legend_layout.addWidget(make_legend("#9E9E9E", "未修改"))
-        legend_layout.addWidget(make_legend("#F44336", "未暂存"))
-        legend_layout.addWidget(make_legend("#FFEB3B", "未提交"))
-        legend_layout.addWidget(make_legend("#4CAF50", "已提交"))
+        self.legend_labels = [] # List of (label_obj, i18n_key)
+        
+        legend_items = [
+            ("#9E9E9E", "file_clean"),
+            ("#F44336", "file_unstaged"),
+            ("#FFEB3B", "file_uncommitted"),
+            ("#4CAF50", "file_staged")
+        ]
+        
+        for color, key in legend_items:
+            container = QWidget()
+            h = QHBoxLayout(container)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.setSpacing(8)
+            
+            dot = QLabel(f'<span style="color:{color}; font-size:16px;">●</span>')
+            lbl = QLabel(tr(key))
+            lbl.setStyleSheet(f"font-size:12px; color:{COLORS['text']};")
+            
+            h.addWidget(dot)
+            h.addWidget(lbl)
+            h.addStretch()
+            
+            legend_layout.addWidget(container)
+            self.legend_labels.append((lbl, key))
         
         legend_layout.addStretch()
         
-        logo_lbl = QLabel()
         logo_pixmap = QPixmap(get_resource_path("logo.png")).scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        logo_lbl.setPixmap(logo_pixmap)
-        logo_lbl.setAlignment(Qt.AlignCenter)
-        legend_layout.addWidget(logo_lbl)
+        self.logo_btn = AnimatedLogo(logo_pixmap)
+        self.logo_btn.clicked.connect(self._handle_cleanup)
+        legend_layout.addWidget(self.logo_btn, alignment=Qt.AlignLeft)
         
         right_layout.addLayout(legend_layout)
         
@@ -265,6 +309,9 @@ class MainWindow(QMainWindow):
             self.lbl_branch.setText(f"{tr('current_branch')}: {self.current_state.currentBranch}")
         else:
             self.lbl_branch.setText(f"{tr('current_branch')}: -")
+            
+        for lbl, key in self.legend_labels:
+            lbl.setText(tr(key))
 
     def _bind_signals(self):
         self.poller.state_updated.connect(self._on_state_updated)
@@ -281,7 +328,42 @@ class MainWindow(QMainWindow):
         else:
             self.lbl_branch.setText(f"{tr('current_branch')}: -")
             
-        self.file_model.layoutChanged.emit()
+        # Force the file tree to re-query DecorationRole for all visible items
+        root_idx = self.file_model.index(self.poller.repo_path)
+        rows = self.file_model.rowCount(root_idx)
+        if rows > 0:
+            top_left = self.file_model.index(0, 0, root_idx)
+            bottom_right = self.file_model.index(rows - 1, 0, root_idx)
+            self.file_model.dataChanged.emit(top_left, bottom_right, [Qt.DecorationRole])
+        self.file_tree.viewport().update()
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.ActivationChange:
+            if self.isActiveWindow():
+                self.poller.trigger_update()
+        super().changeEvent(event)
+
+    def _switch_branch(self):
+        if not self.current_state or not self.current_state.isRepo:
+            return
+            
+        if self.current_state.hasModified or self.current_state.hasStaged:
+            show_result_modal(self.overlay, False, tr("err_uncommitted_changes"))
+            return
+            
+        choices = self.current_state.branches
+        def do_switch(branch_name):
+            out, err = self.actions.switch_branch(branch_name)
+            if err:
+                show_result_modal(self.overlay, False, f"Switch blocked:\n\n{err}")
+                return False
+            else:
+                self.poller.trigger_update()
+                self.toast.show_message(f"Switched to {branch_name}")
+                return True
+                
+        from ui.components.modals import show_branch_selection_modal
+        show_branch_selection_modal(self.overlay, tr("switch_branch"), choices, do_switch)
 
     def _open_file(self, index):
         path = self.file_model.filePath(index)
@@ -293,17 +375,8 @@ class MainWindow(QMainWindow):
                 subprocess.Popen(['open', path])
 
     def _on_file_clicked(self, index):
-        path = self.file_model.filePath(index)
-        if not os.path.isfile(path) or not self.current_state:
-            return
-            
-        status = self.file_model.get_status(path)
-        if status in ['unstaged', 'staged']:
-            rel_path = os.path.relpath(path, self.poller.repo_path)
-            out, err = self.actions.diff_file(rel_path, staged=(status == 'staged'))
-            if out:
-                from ui.components.modals import show_diff_modal
-                show_diff_modal(self.overlay, rel_path, out)
+        # Feature 'View File Diff' on click has been removed as per user request.
+        pass
 
     def _perform_search(self):
         query = self.search_input.text().strip().lower()
@@ -322,6 +395,85 @@ class MainWindow(QMainWindow):
         
         show_search_results_modal(self.overlay, query, results, self.poller.repo_path, self._open_search_file)
         self.search_input.clear()
+
+    def _show_context_menu(self, pos):
+        index = self.file_tree.indexAt(pos)
+        if not index.isValid():
+            return
+            
+        menu = QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{ background-color: {COLORS['surface']}; color: {COLORS['text']}; border: 1px solid {COLORS['border']}; border-radius: 8px; padding: 4px; }}
+            QMenu::item {{ padding: 6px 24px; border-radius: 4px; }}
+            QMenu::item:selected {{ background-color: {COLORS['primary']}40; color: {COLORS['primary']}; }}
+        """)
+        
+        rename_act = menu.addAction(tr("rename"))
+        delete_act = menu.addAction(tr("delete"))
+        
+        action = menu.exec(self.file_tree.mapToGlobal(pos))
+        if action == rename_act:
+            self._rename_item(index)
+        elif action == delete_act:
+            self._delete_item(index)
+
+    def _rename_item(self, index):
+        old_path = self.file_model.filePath(index)
+        old_name = os.path.basename(old_path)
+        
+        def do_rename(new_name):
+            if not new_name or new_name == old_name:
+                return
+            new_path = os.path.join(os.path.dirname(old_path), new_name)
+            
+            # Simplified rename as requested (ordinary OS rename)
+            try:
+                os.rename(old_path, new_path)
+                self.poller.trigger_update()
+                self.toast.show_message(f"Renamed: {new_name}")
+            except Exception as e:
+                
+                show_result_modal(self.overlay, False, f"Rename failed: {e}")
+                
+        from ui.components.modals import show_input_modal
+        show_input_modal(self.overlay, tr("rename"), do_rename)
+
+    def _delete_item(self, index):
+        path = self.file_model.filePath(index)
+        name = os.path.basename(path)
+        
+        def do_delete():
+            rel_path = os.path.relpath(path, self.poller.repo_path).replace('\\', '/')
+            # Try git rm first (use -r if directory)
+            args = ["rm", "-r", "--force", "--" , rel_path] if os.path.isdir(path) else ["rm", "--force", "--", rel_path]
+            out, err = self.actions.run_cmd(args)
+            
+            if err:
+                # Fallback to OS delete
+                try:
+                    import shutil
+                    if os.path.isdir(path):
+                        shutil.rmtree(path)
+                    else:
+                        os.remove(path)
+                    self.poller.trigger_update()
+                    self.toast.show_message(f"Deleted: {name}")
+                except Exception as e:
+                    
+                    show_result_modal(self.overlay, False, f"Delete failed: {e}")
+            else:
+                self.toast.show_message(f"Git Deleted: {name}")
+                
+        from ui.components.modals import BaseDialogMsg
+        msg = tr("delete_warning").format(name)
+        dialog = BaseDialogMsg(tr("confirm_delete"), self.overlay)
+        lbl = QLabel(msg)
+        lbl.setStyleSheet(f"color: {COLORS['text']}; font-size: 14px;")
+        lbl.setWordWrap(True)
+        dialog.vbox.addWidget(lbl)
+        dialog.add_buttons(on_confirm=do_delete)
+        self.overlay.set_content(dialog)
+        self.overlay.show_animated()
 
     def _open_search_file(self, rel_path):
         import os, sys
@@ -348,11 +500,18 @@ class MainWindow(QMainWindow):
                 show_result_modal(self.overlay, True, tr("sync_success"))
         elif action == "branch":
             def do_branch(name):
+                name = name.strip()
+                is_valid, err_msg = self.actions.is_valid_branch_name(name)
+                if not is_valid:
+                    
+                    show_result_modal(self.overlay, False, err_msg)
+                    return
                 out, err = self.actions.create_branch(name)
                 if err:
-                    show_result_modal(self.overlay, False, f"{tr('branch_failed')}\n\n{err}")
+                    show_result_modal(self.overlay, False, f"Failed: {err}")
                 else:
                     show_result_modal(self.overlay, True, tr("branch_success") + f": {name}")
+                return False
             show_input_modal(self.overlay, tr("enter_task_name"), do_branch)
         elif action == "branch_history":
             if self.current_state:
@@ -364,6 +523,7 @@ class MainWindow(QMainWindow):
                         show_result_modal(self.overlay, False, f"{tr('branch_failed')}\n\n{e}")
                     else:
                         show_result_modal(self.overlay, True, tr("branch_success") + f": {name}")
+                    return False
                 show_history_branch_modal(self.overlay, tr("branch_history"), choices, do_branch_hist)
         elif action == "stage":
             out, err = self.actions.stage_all()
@@ -379,11 +539,15 @@ class MainWindow(QMainWindow):
                 show_result_modal(self.overlay, True, tr("unstage_success"))
         elif action == "commit":
             def do_commit(msg):
+                if not msg.strip():
+                    show_result_modal(self.overlay, False, "Commit message cannot be empty!")
+                    return
                 out, err = self.actions.commit(msg)
                 if err:
                     show_result_modal(self.overlay, False, f"{tr('commit_failed')}\n\n{err}")
                 else:
                     show_result_modal(self.overlay, True, tr("commit_success"))
+                return False
             show_input_modal(self.overlay, tr("describe_work"), do_commit)
         elif action == "undo":
             out, err = self.actions.undo_commit()
@@ -399,6 +563,15 @@ class MainWindow(QMainWindow):
                 else:
                     show_result_modal(self.overlay, True, tr("push_success"))
 
+    def _handle_cleanup(self):
+        self.cleanup_thread = CleanupThread(self.actions, self)
+        
+        def on_done(out, err):
+            self.toast.show_message("垃圾清理完成")
+        
+        self.cleanup_thread.finished.connect(on_done)
+        self.cleanup_thread.start()
+
     def _set_new_cloned_repo(self, new_dir):
         new_dir = new_dir.replace('\\', '/')
         self.panel.line_local.setText(new_dir)
@@ -408,7 +581,7 @@ class MainWindow(QMainWindow):
         self.change_repo(new_dir)
 
     def change_repo(self, path):
-        path = path.replace('\\', '/') if path else path
+        path = os.path.realpath(path).replace('\\', '/') if path else path
         if path and os.path.exists(path):
             if not os.path.exists(os.path.join(path, ".git")):
                 # Show empty folder interaction interceptor
@@ -467,6 +640,7 @@ class MainWindow(QMainWindow):
             self._on_state_updated(GitState())
             
     def _setup_repo_path(self, path):
+        path = os.path.normpath(path)
         self.poller.repo_path = path
         self.file_model.setRootPath(path)
         self.file_tree.setRootIndex(self.file_model.index(path))
