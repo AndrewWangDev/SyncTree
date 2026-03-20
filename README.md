@@ -7,9 +7,9 @@
 </div>
 
 <div align="center">
-  <img src="Test_1.png" width="320" alt="Test Image 1">
+  <img src="Test_1.png" width="640" alt="Test Image 1">
   <br>
-  <img src="Test_2.png" width="320" alt="Test Image 2">
+  <img src="Test_2.png" width="640" alt="Test Image 2">
 </div>
 
 
