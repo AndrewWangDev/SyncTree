@@ -52,13 +52,20 @@ class PanelView(QWidget):
         self.line_remote = QLineEdit(self.config.get("remote_url", ""))
         self.line_remote.editingFinished.connect(self._save_remote_url)
         
-        self.btn_clear = MaterialButton(tr("clear_settings"))
-        self.btn_clear.setStyleSheet(f"QPushButton {{ background: transparent; color: {COLORS['error']}; }}")
-        self.btn_clear.clicked.connect(self._clear_settings)
+        action_layout_remote = QHBoxLayout()
+        action_layout_remote.setSpacing(8)
+        self.btn_save_remote = MaterialButton(tr("save_remote"))
+        self.btn_save_remote.clicked.connect(self._save_remote_url)
+        self.btn_clear_remote = MaterialButton(tr("clear_remote"))
+        self.btn_clear_remote.setStyleSheet(f"QPushButton {{ background: transparent; color: {COLORS['error']}; }}")
+        self.btn_clear_remote.clicked.connect(self._clear_remote_url)
+        
+        action_layout_remote.addWidget(self.btn_save_remote)
+        action_layout_remote.addWidget(self.btn_clear_remote)
         
         grid.addWidget(self.lbl_remote, 1, 0)
         grid.addWidget(self.line_remote, 1, 1)
-        grid.addWidget(self.btn_clear, 1, 2)
+        grid.addLayout(action_layout_remote, 1, 2)
         
         # Project URL & Preview actions
         self.lbl_project = QLabel(tr("project_url"))
@@ -143,7 +150,8 @@ class PanelView(QWidget):
         self.lbl_local.setText(tr("local_repo"))
         self.lbl_remote.setText(tr("remote_repo"))
         self.btn_select.setText(tr("select_folder"))
-        self.btn_clear.setText(tr("clear_settings"))
+        self.btn_clear_remote.setText(tr("clear_remote"))
+        self.btn_save_remote.setText(tr("save_remote"))
         self.lbl_project.setText(tr("project_url"))
         self.btn_preview.setText(tr("preview_project"))
         self.btn_terminal.setText(tr("open_terminal"))
@@ -160,6 +168,7 @@ class PanelView(QWidget):
     def _select_folder(self):
         folder = QFileDialog.getExistingDirectory(self, tr("select_folder"), self.config.get("local_path", ""))
         if folder:
+            folder = folder.replace('\\', '/')
             self.config["local_path"] = folder
             self.line_local.setText(folder)
             save_config(self.config)
@@ -195,13 +204,11 @@ class PanelView(QWidget):
             else:
                 subprocess.Popen(["x-terminal-emulator"], cwd=path)
 
-    def _clear_settings(self):
-        self.config = {"local_path": "", "remote_url": "", "project_url": ""}
-        save_config(self.config)
-        self.line_local.setText("")
+    def _clear_remote_url(self):
         self.line_remote.setText("")
-        self.line_project.setText("")
-        self.action_requested.emit("change_repo", {"path": ""})
+        self.config["remote_url"] = ""
+        save_config(self.config)
+        self.action_requested.emit("set_remote", {"url": ""})
 
     def update_state(self, state):
         # State machine
