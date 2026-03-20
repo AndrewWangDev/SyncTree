@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox, QScrollArea
 from PySide6.QtGui import QPainter, QColor, QBrush, QPaintEvent, QPen
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, Property, Signal
 from ui.theme import COLORS
@@ -83,6 +83,11 @@ class BaseDialogMsg(QWidget):
         title_lbl.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLORS['text']}; border: none;")
         self.vbox.addWidget(title_lbl)
 
+    def _handle_confirm(self, on_confirm):
+        res = on_confirm()
+        if res is not False:
+            self.overlay.hide_animated()
+
     def add_buttons(self, on_confirm, on_cancel=None):
         hbs = QHBoxLayout()
         hbs.addStretch()
@@ -91,7 +96,7 @@ class BaseDialogMsg(QWidget):
         cancel.clicked.connect(lambda: [self.overlay.hide_animated(), on_cancel() if on_cancel else None])
         
         confirm = MaterialButton(tr("confirm"), is_primary=True)
-        confirm.clicked.connect(lambda: [on_confirm(), self.overlay.hide_animated()])
+        confirm.clicked.connect(lambda: self._handle_confirm(on_confirm))
         
         hbs.addWidget(cancel)
         hbs.addWidget(confirm)
@@ -121,12 +126,31 @@ def show_history_branch_modal(overlay, title, history_choices, callback):
     dialog.vbox.addWidget(line_edit)
     
     def confirm():
-        # Extracted choice format is usually: "hash msg"
         choice = combo.currentText()
         if choice:
+            # Format usually: "hash msg"
             hash_val = choice.split(' ', 1)[0].replace('*', '').replace('|', '').replace('\\', '').replace('/', '').strip()
-            callback(line_edit.text(), hash_val)
+            return callback(line_edit.text(), hash_val)
+        return True
             
+    dialog.add_buttons(on_confirm=confirm)
+    overlay.set_content(dialog)
+    overlay.show_animated()
+
+def show_branch_selection_modal(overlay, title, branches, callback):
+    dialog = BaseDialogMsg(title, overlay)
+    
+    combo = QComboBox()
+    combo.setStyleSheet(f"background: {COLORS['surface_variant']}; color: {COLORS['text']}; padding: 8px; border-radius: 8px;")
+    combo.addItems(branches)
+    dialog.vbox.addWidget(combo)
+    
+    def confirm():
+        branch = combo.currentText()
+        if branch:
+            return callback(branch)
+        return True
+    
     dialog.add_buttons(on_confirm=confirm)
     overlay.set_content(dialog)
     overlay.show_animated()
@@ -281,14 +305,16 @@ class EnvDiagModalContent(QWidget):
             status_lbl.setText("")
         elif status == 1:
             if step == 0:
-                status_lbl.setText(tr("status_not_exist") if "否" in text else tr("status_normal"))
+                # Use a flag from the thread later if possible, but for now fixed tr logic
+                # Actually step 0 is qq_test. Status 1 means 'Not Present'
+                status_lbl.setText(tr("status_not_exist"))
             elif step >= 1 and step <= 5:
                 if step == 5:
                     status_lbl.setText(tr("status_not_exist"))
                 else:
                     status_lbl.setText(tr("status_normal"))
             else:
-                status_lbl.setText("已配置")
+                status_lbl.setText(tr("status_configured"))
             status_lbl.setStyleSheet("color: #4CAF50;")
         elif status == 2:
             if step >= 1 and step <= 5:
@@ -297,14 +323,14 @@ class EnvDiagModalContent(QWidget):
                 else:
                     status_lbl.setText(tr("status_abnormal"))
             else:
-                status_lbl.setText("未配置")
+                status_lbl.setText(tr("status_not_configured"))
             status_lbl.setStyleSheet("color: #F44336;")
         elif status == 3:
             if step == 0:
-                status_lbl.setText("是")
+                status_lbl.setText(tr("status_yes"))
                 status_lbl.setStyleSheet("color: #FFC107;")
             elif step == 7:
-                status_lbl.setText("未检测")
+                status_lbl.setText(tr("status_not_tested"))
                 status_lbl.setStyleSheet("color: #FFC107;")
             else:
                 status_lbl.setText(tr("status_abnormal"))
@@ -316,22 +342,24 @@ class EnvDiagModalContent(QWidget):
         
         conclusions = []
         if self.thread.property("err_git_user"):
-            conclusions.append("未配置Git用户")
+            conclusions.append(tr("err_no_git_user"))
         if self.thread.property("err_ssh"):
-            conclusions.append("未配置SSH密钥对")
+            conclusions.append(tr("err_no_ssh"))
         if self.thread.property("err_dns"):
-            conclusions.append("可能存在运营商干扰")
+            conclusions.append(tr("err_dns_isp"))
         if self.thread.property("err_gfw"):
-            conclusions.append("可能存在GFW（墙）干扰")
+            conclusions.append(tr("err_gfw_blocked"))
         if self.thread.property("err_qq"):
-            conclusions.append("存在不安全的中国软件，建议关闭")
+            conclusions.append(tr("err_cn_soft"))
             
         self.conclusion_lbl.show()
         if not conclusions:
-            self.conclusion_lbl.setText(tr("conclusion") + " " + "完全正常")
+            self.conclusion_lbl.setText(tr("conclusion") + " " + tr("conclusion_ok"))
             self.conclusion_lbl.setStyleSheet("font-size: 14px; font-weight: bold; margin-top: 12px; color: #4CAF50;")
         else:
-            self.conclusion_lbl.setText(tr("conclusion") + " " + "，".join(conclusions))
+            # Join with comma based on locale if possible, or just standard comma
+            sep = "，" if lang_manager.current_lang == "zh" else ", "
+            self.conclusion_lbl.setText(tr("conclusion") + " " + sep.join(conclusions))
             self.conclusion_lbl.setStyleSheet("font-size: 14px; font-weight: bold; margin-top: 12px; color: #FFC107;")
 
     def restart_diag(self):
@@ -417,14 +445,17 @@ class AboutModalContent(QWidget):
         layout.setSpacing(12)
         layout.setAlignment(Qt.AlignCenter)
         
-        logo_lbl = QLabel()
         from PySide6.QtGui import QPixmap
         import sys, os
+        from ui.components.buttons import AnimatedLogo
+        
         logo_path = os.path.join(sys._MEIPASS, "logo.png") if hasattr(sys, '_MEIPASS') else "logo.png"
-        pix = QPixmap(logo_path).scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        logo_lbl.setPixmap(pix)
-        logo_lbl.setAlignment(Qt.AlignCenter)
-        layout.addWidget(logo_lbl)
+        pix = QPixmap(logo_path)
+        
+        self.logo_btn = AnimatedLogo(pix)
+        self.logo_btn.setFixedSize(80, 80)
+        # Clicking it only triggers rotation (built into AnimatedLogo), no git ops
+        layout.addWidget(self.logo_btn, alignment=Qt.AlignCenter)
         
         title = QLabel("SyncTree")
         title.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {COLORS['text']};")
@@ -572,11 +603,13 @@ class ResultModalContent(QWidget):
         self.setAttribute(Qt.WA_StyledBackground)
         self.setObjectName("ResultContainer")
         self.setStyleSheet(f"#ResultContainer {{ background-color: {COLORS['surface']}; border-radius: 16px; border: 1px solid {COLORS['border']}; }}")
-        self.setFixedWidth(380)
+        self.setMinimumWidth(480)
+        self.setMaximumWidth(640)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
+        layout.setSizeConstraint(QVBoxLayout.SetFixedSize)
+        layout.setContentsMargins(32, 24, 32, 24)
+        layout.setSpacing(20)
         
         icon_lbl = QLabel()
         icon_lbl.setAlignment(Qt.AlignCenter)
@@ -589,13 +622,28 @@ class ResultModalContent(QWidget):
             
         layout.addWidget(icon_lbl)
         
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll.setMaximumHeight(300)
+        
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background: transparent;")
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        
         msg_lbl = QLabel(message)
-        msg_lbl.setStyleSheet(f"font-size: 15px; color: {COLORS['text']};")
+        msg_lbl.setStyleSheet(f"font-size: 15px; color: {COLORS['text']}; line-height: 1.4;")
         msg_lbl.setAlignment(Qt.AlignCenter)
         msg_lbl.setWordWrap(True)
-        layout.addWidget(msg_lbl)
+        scroll_layout.addWidget(msg_lbl)
         
-        layout.addSpacing(8)
+        scroll.setWidget(scroll_content)
+        # Ensure scroll area doesn't force extra layout stretch if content is small
+        from PySide6.QtWidgets import QSizePolicy
+        scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        layout.addWidget(scroll)
         
         btn_l = QHBoxLayout()
         btn_l.addStretch()

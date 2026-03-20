@@ -214,8 +214,9 @@ class PanelView(QWidget):
         # State machine
         repo_ok = state.isRepo
         no_changes = not state.hasModified and not state.hasStaged
+        is_main = state.currentBranch in ("main", "master")
         
-        self.btn_sync.setEnabled(repo_ok and no_changes)
+        self.btn_sync.setEnabled(repo_ok and no_changes and is_main)
         self.btn_task.setEnabled(repo_ok)
         self.btn_history.setEnabled(repo_ok and no_changes)
         
@@ -223,7 +224,7 @@ class PanelView(QWidget):
         self.btn_unstage.setEnabled(repo_ok and state.hasStaged)
         self.btn_commit.setEnabled(repo_ok and state.hasStaged)
         
-        self.btn_undo.setEnabled(repo_ok and state.commitsAhead > 0)
+        self.btn_undo.setEnabled(repo_ok and state.canUndo)
         self.btn_push.setEnabled(bool(repo_ok and (state.commitsAhead > 0 or state.currentBranch)))
         self._update_preview_state()
 

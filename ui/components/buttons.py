@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QPushButton
-from PySide6.QtGui import QPainter, QColor, QBrush, QPaintEvent, QPen, QPainterPath
-from PySide6.QtCore import Qt, QPoint, QPropertyAnimation, QEasingCurve, Property, QRectF
+from PySide6.QtCore import Qt, QPoint, QPropertyAnimation, QEasingCurve, Property, QRectF, Signal
+from PySide6.QtGui import QPainter, QColor, QBrush, QPaintEvent, QPen, QPainterPath, QPixmap, QTransform
 from ui.theme import COLORS
 
 class MaterialButton(QPushButton):
@@ -83,4 +83,56 @@ class MaterialButton(QPushButton):
         painter.setFont(font)
         painter.drawText(rect, Qt.AlignCenter, self.text())
         
+        painter.end()
+
+class AnimatedLogo(QPushButton):
+    clicked = Signal()
+
+    def __init__(self, pixmap, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(100, 80)
+        self.setStyleSheet("background: transparent; border: none;")
+        self.setCursor(Qt.PointingHandCursor)
+        
+        self.pixmap = pixmap
+        self._rotation = 0
+        
+        self.anim = QPropertyAnimation(self, b"rotation")
+        self.anim.setDuration(1200)
+        self.anim.setEasingCurve(QEasingCurve.InOutQuad)
+        
+    @Property(float)
+    def rotation(self): return self._rotation
+    @rotation.setter
+    def rotation(self, val):
+        self._rotation = val
+        self.update()
+
+    def mousePressEvent(self, e):
+        super().mousePressEvent(e)
+        if self.anim.state() == QPropertyAnimation.Stopped:
+            self.anim.setStartValue(0)
+            self.anim.setEndValue(720) # 2 rotations
+            self.anim.start()
+            self.clicked.emit()
+
+    def paintEvent(self, e):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        
+        center = self.rect().center()
+        painter.translate(center)
+        painter.rotate(self._rotation)
+        painter.translate(-center)
+        
+        # Calculate aspect ratio preserving rect
+        content_rect = self.rect().adjusted(4, 4, -4, -4)
+        scaled_pixmap = self.pixmap.scaled(content_rect.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        
+        # Center the scaled pixmap
+        x = (self.width() - scaled_pixmap.width()) // 2
+        y = (self.height() - scaled_pixmap.height()) // 2
+        
+        painter.drawPixmap(x, y, scaled_pixmap)
         painter.end()
