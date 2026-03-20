@@ -85,3 +85,11 @@ class GitActions:
             url = match.group(0)
             webbrowser.open(url)
         return out, None
+
+    def diff_file(self, file_path, staged=False):
+        args = ["diff"]
+        if staged:
+            args.append("--cached")
+        args.append("--")
+        args.append(file_path)
+        return self.run_cmd(args)
