@@ -7,8 +7,8 @@
 </div>
 
 <div align="center">
-  <img src="test_1.png" width="320" alt="Test Image 1">
-  <img src="test_2.png" width="320" alt="Test Image 2">
+  <img src="Test_1.png" width="320" alt="Test Image 1">
+  <img src="Test_2.png" width="320" alt="Test Image 2">
 </div>
 
 **SyncTree** is a lightweight, fully fool-proof Git graphical desktop client developed based on `PySide6`.  
