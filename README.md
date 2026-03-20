@@ -8,8 +8,10 @@
 
 <div align="center">
   <img src="Test_1.png" width="320" alt="Test Image 1">
+  <br>
   <img src="Test_2.png" width="320" alt="Test Image 2">
 </div>
+
 
 **SyncTree** is a lightweight, fully fool-proof Git graphical desktop client developed based on `PySide6`.  
 It is tailored for Git beginners and developers who need a pure, zero-mental-burden code version management tool.
