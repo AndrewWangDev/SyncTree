@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 def build():
-    print("Building SyncTree application")
+    print("Building SyncTree application using PyInstaller...")
     
     # Ensure dist and build directories don't cause conflicts
     if os.path.exists("build"):

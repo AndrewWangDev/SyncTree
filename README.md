@@ -1,9 +1,17 @@
+
+....
+
 <div align="center">
   <img src="logo.png" width="128" height="128" alt="SyncTree Logo">
   <h1>SyncTree (Beta)</h1>
 </div>
 
-**SyncTree** is a lightweight, fully fool-proof Git graphical desktop client developed based on `PySide6`. 
+<div align="center">
+  <img src="test_1.png" width="320" alt="Test Image 1">
+  <img src="test_2.png" width="320" alt="Test Image 2">
+</div>
+
+**SyncTree** is a lightweight, fully fool-proof Git graphical desktop client developed based on `PySide6`.  
 It is tailored for Git beginners and developers who need a pure, zero-mental-burden code version management tool.
 
 ---
@@ -58,11 +66,9 @@ SimpleG/
 
 ### 1. Prerequisites
 
-First, ensure your operating system has the latest native **Git** environment installed (can be verified by executing `git --version` in the global system Terminal), and a **Python 3.10+** environment is required.
+Ensure your operating system has the latest native **Git** environment installed (`git --version`), and a **Python 3.10+** environment is required.
 
 ### 2. Download and Run
-
-Clone the repository, install the dependencies, and run it directly to experience:
 
 ```bash
 git clone https://github.com/AndrewWangDev/SyncTree
@@ -73,18 +79,17 @@ python main.py
 
 ### 3. Build and Publish as Standalone `.exe`
 
-Quickly compile a standalone executable locally:
-
 ```bash
 python build.py
 ```
+
 > The output will be located in the newly created `dist/synctree.exe` directory.
 
 ---
 
 ## 📄 License
 
-This software is released under the **[GNU General Public License v2.0 (GPL-2.0)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)**. 
+This software is released under the **[GNU General Public License v2.0 (GPL-2.0)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)**.  
 Because SyncTree operates natively as a client wrapper interacting directly with core Git binaries, it adheres identically to the open-source distribution constraints and licensing terms set structurally by the official Git project ecosystem limit.
 
 ---
@@ -92,3 +97,5 @@ Because SyncTree operates natively as a client wrapper interacting directly with
 ## 👨‍💻 Author
 
 Developed / Designed with ❤️ by **[Andrew Wang Dev](https://andrewwangdev.com/about/)**.
+
+....

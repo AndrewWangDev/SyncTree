@@ -149,13 +149,13 @@ class MainWindow(QMainWindow):
         self.btn_about_us.clicked.connect(lambda: show_about_modal(self.overlay))
         
         right_layout = QHBoxLayout()
-        right_layout.setSpacing(16)
+        right_layout.setSpacing(8)
         right_layout.addWidget(self.btn_diag)
         right_layout.addWidget(self.btn_about_us)
+        right_layout.addSpacing(8)
         right_layout.addWidget(self.btn_lang)
         
         header_layout.addLayout(title_layout)
-        header_layout.addStretch()
         
         def create_search_icon():
             pixmap = QPixmap(16, 16)
@@ -173,14 +173,25 @@ class MainWindow(QMainWindow):
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText(tr("search_files") + "...")
-        self.search_input.setFixedWidth(250)
+        from PySide6.QtWidgets import QSizePolicy
+        self.search_input.setMinimumWidth(200)
+        self.search_input.setMaximumWidth(500)
+        self.search_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.search_input.setFixedHeight(32)
         self.search_input.setStyleSheet(f"background-color: {COLORS['surface_variant']}; border: none; border-radius: 16px; padding: 0 12px 0 4px; color: {COLORS['text']};")
         self.search_input.addAction(create_search_icon(), QLineEdit.LeadingPosition)
         self.search_input.returnPressed.connect(self._perform_search)
-        header_layout.addWidget(self.search_input)
         
+        header_layout.addSpacing(24)
+        header_layout.addWidget(self.search_input)
         header_layout.addStretch()
+        
+        self.lbl_branch = QLabel(f"{tr('current_branch')}: -")
+        self.lbl_branch.setFixedHeight(32)
+        self.lbl_branch.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLORS['primary']}; background: {COLORS['surface_variant']}; padding: 0 12px; border-radius: 8px;")
+        header_layout.addWidget(self.lbl_branch)
+        header_layout.addSpacing(16)
+        
         header_layout.addLayout(right_layout)
         
         main_layout.addLayout(header_layout)
@@ -203,9 +214,11 @@ class MainWindow(QMainWindow):
         for i in range(1, 4):
             self.file_tree.hideColumn(i)
         self.file_tree.doubleClicked.connect(self._open_file)
+        self.file_tree.clicked.connect(self._on_file_clicked)
             
         right_layout.addWidget(self.file_tree, stretch=1)
         
+        from PySide6.QtWidgets import QListWidget, QListWidgetItem, QSizePolicy
         legend_layout = QVBoxLayout()
         legend_layout.setContentsMargins(4, 4, 4, 4)
         def make_legend(color, text):
@@ -214,7 +227,15 @@ class MainWindow(QMainWindow):
         legend_layout.addWidget(make_legend("#F44336", "未暂存"))
         legend_layout.addWidget(make_legend("#FFEB3B", "未提交"))
         legend_layout.addWidget(make_legend("#4CAF50", "已提交"))
+        
         legend_layout.addStretch()
+        
+        logo_lbl = QLabel()
+        logo_pixmap = QPixmap(get_resource_path("logo.png")).scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        logo_lbl.setPixmap(logo_pixmap)
+        logo_lbl.setAlignment(Qt.AlignCenter)
+        legend_layout.addWidget(logo_lbl)
+        
         right_layout.addLayout(legend_layout)
         
         top_splitter.addWidget(self.graph)
@@ -240,6 +261,10 @@ class MainWindow(QMainWindow):
         self.btn_about_us.setText(tr("about_us"))
         self.btn_diag.setText(tr("network_diag"))
         self.search_input.setPlaceholderText(tr("search_files") + "...")
+        if self.current_state and self.current_state.currentBranch:
+            self.lbl_branch.setText(f"{tr('current_branch')}: {self.current_state.currentBranch}")
+        else:
+            self.lbl_branch.setText(f"{tr('current_branch')}: -")
 
     def _bind_signals(self):
         self.poller.state_updated.connect(self._on_state_updated)
@@ -250,6 +275,12 @@ class MainWindow(QMainWindow):
         self.current_state = state
         self.graph.update_graph(state)
         self.panel.update_state(state)
+        
+        if state.currentBranch:
+            self.lbl_branch.setText(f"{tr('current_branch')}: {state.currentBranch}")
+        else:
+            self.lbl_branch.setText(f"{tr('current_branch')}: -")
+            
         self.file_model.layoutChanged.emit()
 
     def _open_file(self, index):
@@ -260,6 +291,19 @@ class MainWindow(QMainWindow):
             elif sys.platform == 'darwin':
                 import subprocess
                 subprocess.Popen(['open', path])
+
+    def _on_file_clicked(self, index):
+        path = self.file_model.filePath(index)
+        if not os.path.isfile(path) or not self.current_state:
+            return
+            
+        status = self.file_model.get_status(path)
+        if status in ['unstaged', 'staged']:
+            rel_path = os.path.relpath(path, self.poller.repo_path)
+            out, err = self.actions.diff_file(rel_path, staged=(status == 'staged'))
+            if out:
+                from ui.components.modals import show_diff_modal
+                show_diff_modal(self.overlay, rel_path, out)
 
     def _perform_search(self):
         query = self.search_input.text().strip().lower()
@@ -355,27 +399,82 @@ class MainWindow(QMainWindow):
                 else:
                     show_result_modal(self.overlay, True, tr("push_success"))
 
+    def _set_new_cloned_repo(self, new_dir):
+        new_dir = new_dir.replace('\\', '/')
+        self.panel.line_local.setText(new_dir)
+        self.panel.config["local_path"] = new_dir
+        from core.config import save_config
+        save_config(self.panel.config)
+        self.change_repo(new_dir)
+
     def change_repo(self, path):
+        path = path.replace('\\', '/') if path else path
         if path and os.path.exists(path):
-            self.poller.repo_path = path
-            self.file_model.setRootPath(path)
-            self.file_tree.setRootIndex(self.file_model.index(path))
-            
-            # Check if .git exists, else init
             if not os.path.exists(os.path.join(path, ".git")):
-                self.actions.init_repo()
-                self.toast.show_message(tr("auto_init"))
+                # Show empty folder interaction interceptor
+                def do_init():
+                    self._setup_repo_path(path)
+                    self.actions.init_repo()
+                    self.toast.show_message(tr("auto_init"))
+                    
+                def do_clone():
+                    def perform_clone(url):
+                        self.panel.line_remote.setText(url)
+                        self.panel.config["remote_url"] = url
+                        self.toast.show_message("正在克隆，请耐心等待...")
+                        
+                        from PySide6.QtCore import QThread, Signal
+                        class CloneThread(QThread):
+                            res_ready = Signal(object)
+                            def __init__(self, c_url, c_cwd, parent=None):
+                                super().__init__(parent)
+                                self.url = c_url
+                                self.cwd = c_cwd
+                            def run(self):
+                                import subprocess, os
+                                cr = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                                res = subprocess.run(["git", "clone", self.url], cwd=self.cwd, capture_output=True, text=True, creationflags=cr, encoding='utf-8', errors='replace')
+                                self.res_ready.emit(res)
+                                
+                        def on_clone_done(res):
+                            if res.returncode == 0:
+                                dirs = [os.path.join(path, d) for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
+                                if len(dirs) >= 1:
+                                    # Choose the most recently created or the only dir
+                                    self._set_new_cloned_repo(dirs[-1])
+                                    self.toast.show_message("克隆成功")
+                                else:
+                                    self.toast.show_message("克隆完成但找不到子文件夹")
+                            else:
+                                show_result_modal(self.overlay, False, f"克隆失败:\n{res.stderr}")
+                                
+                        self._clone_thread = CloneThread(url, path, self)
+                        self._clone_thread.res_ready.connect(on_clone_done)
+                        self._clone_thread.start()
+                        
+                    from ui.components.modals import show_input_modal
+                    show_input_modal(self.overlay, "请输入远程仓库URL", perform_clone)
+                    
+                from ui.components.modals import show_empty_folder_modal
+                show_empty_folder_modal(self.overlay, do_init, do_clone)
+                return
                 
-            if not self.poller.isRunning():
-                self.poller.start()
-            else:
-                self.poller.trigger_update()
+            self._setup_repo_path(path)
         else:
             self.poller.stop()
             self.poller.wait()
-            # Reset state
             from core.state import GitState
             self._on_state_updated(GitState())
+            
+    def _setup_repo_path(self, path):
+        self.poller.repo_path = path
+        self.file_model.setRootPath(path)
+        self.file_tree.setRootIndex(self.file_model.index(path))
+        
+        if not self.poller.isRunning():
+            self.poller.start()
+        else:
+            self.poller.trigger_update()
 
     def closeEvent(self, event):
         self.poller.stop()

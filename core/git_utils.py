@@ -102,6 +102,9 @@ class GitPoller(QThread):
         # Branch
         state.currentBranch = self._run_git(["branch", "--show-current"])
         
+        branches_out = self._run_git(["branch", "--format=%(refname:short)"])
+        state.branches = [b.strip() for b in branches_out.split('\n') if b.strip()] if branches_out else []
+
         # Commits ahead
         ahead = self._run_git(["rev-list", "--left-right", "--count", "HEAD...@{u}"])
         if ahead:
