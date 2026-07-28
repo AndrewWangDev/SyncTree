@@ -221,10 +221,6 @@ class EnvDiagModalContent(QWidget):
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(10)
         
-        lbl_dev = QLabel(tr("dev_diag"))
-        lbl_dev.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLORS['primary']}; margin-top: 8px;")
-        layout.addWidget(lbl_dev)
-        
         self.rows = []
         
         def add_row(text):
@@ -248,8 +244,6 @@ class EnvDiagModalContent(QWidget):
             
             self.rows.append((dot, lbl, status_lbl, text))
             
-        add_row(tr("qq_test"))
-        
         lbl_net = QLabel(tr("net_diag"))
         lbl_net.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLORS['primary']}; margin-top: 12px;")
         layout.addWidget(lbl_net)
@@ -304,12 +298,8 @@ class EnvDiagModalContent(QWidget):
         if status == 0:
             status_lbl.setText("")
         elif status == 1:
-            if step == 0:
-                # Use a flag from the thread later if possible, but for now fixed tr logic
-                # Actually step 0 is qq_test. Status 1 means 'Not Present'
-                status_lbl.setText(tr("status_not_exist"))
-            elif step >= 1 and step <= 5:
-                if step == 5:
+            if step >= 0 and step <= 4:
+                if step == 4:
                     status_lbl.setText(tr("status_not_exist"))
                 else:
                     status_lbl.setText(tr("status_normal"))
@@ -317,8 +307,8 @@ class EnvDiagModalContent(QWidget):
                 status_lbl.setText(tr("status_configured"))
             status_lbl.setStyleSheet("color: #4CAF50;")
         elif status == 2:
-            if step >= 1 and step <= 5:
-                if step == 5:
+            if step >= 0 and step <= 4:
+                if step == 4:
                     status_lbl.setText(tr("status_exist"))
                 else:
                     status_lbl.setText(tr("status_abnormal"))
@@ -326,10 +316,7 @@ class EnvDiagModalContent(QWidget):
                 status_lbl.setText(tr("status_not_configured"))
             status_lbl.setStyleSheet("color: #F44336;")
         elif status == 3:
-            if step == 0:
-                status_lbl.setText(tr("status_yes"))
-                status_lbl.setStyleSheet("color: #FFC107;")
-            elif step == 7:
+            if step == 6:
                 status_lbl.setText(tr("status_not_tested"))
                 status_lbl.setStyleSheet("color: #FFC107;")
             else:
@@ -349,8 +336,6 @@ class EnvDiagModalContent(QWidget):
             conclusions.append(tr("err_dns_isp"))
         if self.thread.property("err_gfw"):
             conclusions.append(tr("err_gfw_blocked"))
-        if self.thread.property("err_qq"):
-            conclusions.append(tr("err_cn_soft"))
             
         self.conclusion_lbl.show()
         if not conclusions:
