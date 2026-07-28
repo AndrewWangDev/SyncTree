@@ -7,14 +7,17 @@
 </div>
 
 <div align="center">
-  <img src="Test_1.png" width="640" alt="Test Image 1">
-  <br>
-  <img src="Test_2.png" width="640" alt="Test Image 2">
+  <img src="test_1.png" width="320" alt="Test Image 1">
+  <img src="test_2.png" width="320" alt="Test Image 2">
 </div>
-
 
 **SyncTree** is a lightweight, fully fool-proof Git graphical desktop client developed based on `PySide6`.  
 It is tailored for Git beginners and developers who need a pure, zero-mental-burden code version management tool.
+
+<div align="center">
+  <img src="test_1.png" width="800" alt="Interface Overview">
+  <p><i>Main Interface Overview</i></p>
+</div>
 
 ---
 
@@ -26,6 +29,11 @@ It is tailored for Git beginners and developers who need a pure, zero-mental-bur
 - **Automated PR / MR Generation**: Native silent execution of background commands when pushing code, supporting intelligent regex sniffing of GitLab/Github generated Pull Request URLs and opening them directly in the default browser to share with the team seamlessly.
 - **Multi-Language Support (EN/CN)**: An independent `i18n` module supports seamless refreshing and redrawing of all characters at the UI layer.
 - **Rich Diagnostic Toolkit**: Integrates deep connection probing mechanics that natively ping loopback adapters, resolve network APIs automatically, and evaluate presence of GFW blockers when detecting asynchronous sync/push failures.
+
+<div align="center">
+  <img src="test_2.png" width="800" alt="Diagnostics and Dark Mode">
+  <p><i>Environment Diagnostics and Immersive Dark Mode</i></p>
+</div>
 
 ---
 
