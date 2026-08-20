@@ -25,10 +25,6 @@ It is tailored for Git beginners and developers who need a pure, zero-mental-bur
 - **Multi-Language Support (EN/CN)**: An independent `i18n` module supports seamless refreshing and redrawing of all characters at the UI layer.
 - **Rich Diagnostic Toolkit**: Integrates deep connection probing mechanics that natively ping loopback adapters, resolve network APIs automatically, and evaluate presence of GFW blockers when detecting asynchronous sync/push failures.
 
-<div align="center">
-  <img src="test_2.png" width="800" alt="Diagnostics and Dark Mode">
-  <p><i>Environment Diagnostics and Immersive Dark Mode</i></p>
-</div>
 
 ---
 
