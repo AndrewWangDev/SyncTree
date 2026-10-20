@@ -39,7 +39,9 @@ QLineEdit:focus {{
 }}
 
 QLineEdit:disabled {{
-    opacity: 0.3;
+    color: rgba(227, 227, 227, 0.35);
+    background-color: rgba(46, 46, 46, 0.4);
+    border-color: rgba(68, 71, 78, 0.4);
 }}
 
 /* For standard buttons that might not use the custom paintEvent */

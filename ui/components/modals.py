@@ -18,8 +18,13 @@ class ModalOverlay(QWidget):
         
         self._bg_opacity = 0
         self.anim = QPropertyAnimation(self, b"bgOpacity")
+        self.anim.finished.connect(self._on_anim_finished)
         
         self.content_widget = None
+
+    def _on_anim_finished(self):
+        if self._bg_opacity <= 0.01:
+            self.hide()
 
     @Property(float)
     def bgOpacity(self): return self._bg_opacity
@@ -45,7 +50,8 @@ class ModalOverlay(QWidget):
         self.content_widget = widget
 
     def show_animated(self):
-        self.resize(self.parent().size())
+        if self.parent():
+            self.resize(self.parent().size())
         self.show()
         self.raise_()
         self.anim.stop()
@@ -59,7 +65,6 @@ class ModalOverlay(QWidget):
         self.anim.setStartValue(self._bg_opacity)
         self.anim.setEndValue(0)
         self.anim.setDuration(250)
-        self.anim.finished.connect(lambda: self.hide() if self._bg_opacity==0 else None)
         self.anim.start()
 
     def resizeEvent(self, e):
@@ -434,7 +439,7 @@ class AboutModalContent(QWidget):
         import sys, os
         from ui.components.buttons import AnimatedLogo
         
-        logo_path = os.path.join(sys._MEIPASS, "logo.png") if hasattr(sys, '_MEIPASS') else "logo.png"
+        logo_path = os.path.join(sys._MEIPASS, "logo.png") if hasattr(sys, '_MEIPASS') else os.path.join(os.path.abspath("."), "logo.png")
         pix = QPixmap(logo_path)
         
         self.logo_btn = AnimatedLogo(pix)
@@ -689,7 +694,8 @@ class DiffModalContent(QWidget):
         
         html = []
         html.append("<pre style='margin:0; white-space:pre-wrap;'>")
-        for line in diff_text.split('\\n'):
+        lines = diff_text.splitlines() if diff_text else []
+        for line in lines:
             escaped = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             if escaped.startswith('+'):
                 html.append(f"<span style='color: #4CAF50;'>{escaped}</span>")

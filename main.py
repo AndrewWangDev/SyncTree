@@ -89,8 +89,12 @@ class SplashScreen(QWidget):
 
 
 def main():
-    # Make sure we run from the script directory for config.json to behave well
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    # Avoid chdir to temporary MEIPASS dir in PyInstaller single-file mode
+    if not hasattr(sys, '_MEIPASS'):
+        try:
+            os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        except Exception:
+            pass
     
     # Optional styling or High DPI scaling - MUST be before QApplication
     if hasattr(Qt, 'HighDpiScaleFactorRoundingPolicy'):

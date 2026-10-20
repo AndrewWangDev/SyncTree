@@ -11,7 +11,7 @@ class GitActions:
         import subprocess, os
         repo_path = self.poller.repo_path
         if not repo_path or not os.path.exists(repo_path):
-            return "", "No repo"
+            return None, "No repo"
 
         startupinfo = None
         if os.name == 'nt':
@@ -44,15 +44,30 @@ class GitActions:
         return self.run_cmd(["init"])
 
     def set_remote(self, url):
+        url = url.strip() if url else ""
         out, err = self.run_cmd(["remote"])
-        if err is None and "origin" in out:
+        has_origin = (err is None and out is not None and "origin" in out)
+
+        if not url:
+            if has_origin:
+                return self.run_cmd(["remote", "remove", "origin"])
+            return "", None
+
+        if has_origin:
             return self.run_cmd(["remote", "set-url", "origin", url])
         else:
             return self.run_cmd(["remote", "add", "origin", url])
 
-    def sync_latest(self):
-        # User specified: Remote is always main.
-        return self.run_cmd(["pull", "origin", "main"])
+    def sync_latest(self, branch=None):
+        if not branch:
+            upstream, err = self.run_cmd(["rev-parse", "--abbrev-ref", "@{upstream}"])
+            if upstream and not err:
+                parts = upstream.split("/", 1)
+                if len(parts) == 2:
+                    return self.run_cmd(["pull", parts[0], parts[1]])
+            current, _ = self.run_cmd(["branch", "--show-current"])
+            branch = current if current else "main"
+        return self.run_cmd(["pull", "origin", branch])
 
     def create_branch(self, name, commit_hash=None):
         if commit_hash:
@@ -62,8 +77,6 @@ class GitActions:
     def is_valid_branch_name(self, name):
         if not name or not name.strip():
             return False, "Branch name cannot be empty"
-        # git check-ref-format --branch <name>
-        # returns 0 if valid, non-zero if invalid
         out, err = self.run_cmd(["check-ref-format", "--branch", name])
         if err:
             return False, f"Invalid branch name: {name}\n(No spaces, no '..', no special symbols like ~^:?*)"
@@ -76,19 +89,24 @@ class GitActions:
         return self.run_cmd(["add", "."])
 
     def unstage_all(self):
+        check, _ = self.run_cmd(["rev-parse", "--verify", "HEAD"])
+        if check is None:
+            return self.run_cmd(["rm", "--cached", "-r", "."])
         return self.run_cmd(["reset", "--mixed", "HEAD"])
 
     def commit(self, msg):
         return self.run_cmd(["commit", "-m", msg])
 
     def undo_commit(self):
+        check, _ = self.run_cmd(["rev-parse", "--verify", "HEAD~1"])
+        if check is None:
+            return self.run_cmd(["update-ref", "-d", "HEAD"])
         return self.run_cmd(["reset", "--soft", "HEAD^"])
 
     def push(self, branch):
         out, err = self.run_cmd(["push", "-u", "origin", branch], get_stderr=True)
         if out is None:
             return None, err
-        # Parse output for PR url
         output = (out or "") + "\n" + (err or "")
         match = re.search(r'https?://[^\s]+/(?:pull/new|merge_requests/new)[^\s]*', output)
         if match:
@@ -104,12 +122,16 @@ class GitActions:
         args.append(file_path)
         return self.run_cmd(args)
 
+    def preview_cleanup(self):
+        """预览将被清理的文件（dry-run）"""
+        return self.run_cmd(["clean", "-fd", "--dry-run"])
+
     def cleanup_garbage(self):
-        # git clean -fd removes untracked files/directories
-        # git gc runs garbage collection
         out1, err1 = self.run_cmd(["clean", "-fd"])
         out2, err2 = self.run_cmd(["gc"])
-        return (out1 or "") + (out2 or ""), (err1 or err2)
+        res_out = ((out1 or "") + "\n" + (out2 or "")).strip()
+        res_err = (err1 or "") if err1 else (err2 or None)
+        return res_out, res_err
 
 class CleanupThread(QThread):
     finished = Signal(str, str) # result_msg, error_msg
@@ -120,4 +142,4 @@ class CleanupThread(QThread):
 
     def run(self):
         out, err = self.actions.cleanup_garbage()
-        self.finished.emit(out, err)
+        self.finished.emit(out or "", err or "")
