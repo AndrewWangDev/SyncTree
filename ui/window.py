@@ -1,10 +1,10 @@
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSplitter, QTreeView, QFileSystemModel, QMenu
-from PySide6.QtGui import QIcon, QCursor, QPainter, QPixmap, QColor, QPen
-from PySide6.QtCore import Qt, QTimer, QEvent
+from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSplitter, QTreeView, QFileSystemModel, QMenu, QLineEdit
+from PySide6.QtGui import QIcon, QCursor, QPainter, QPixmap, QColor, QPen, QDesktopServices
+from PySide6.QtCore import Qt, QTimer, QEvent, QUrl
 import os
 import sys
 import ctypes
-import webbrowser
+import re
 
 def get_resource_path(relative_path):
     if hasattr(sys, '_MEIPASS'):
@@ -12,7 +12,10 @@ def get_resource_path(relative_path):
     return os.path.join(os.path.abspath("."), relative_path)
 
 if os.name == 'nt':
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("andrewwang.synctree.beta.1")
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("andrewwang.synctree.beta.1")
+    except Exception:
+        pass
 
 from core.git_utils import GitPoller
 from core.git_actions import GitActions, CleanupThread
@@ -22,8 +25,7 @@ from ui.graph_view import GraphView
 from ui.panel_view import PanelView
 from ui.components.buttons import MaterialButton, AnimatedLogo
 from ui.components.toast import ToastLabel
-from ui.components.modals import ModalOverlay, show_input_modal, show_history_branch_modal, show_diag_modal, show_about_modal, show_search_results_modal, show_result_modal
-from PySide6.QtWidgets import QLineEdit
+from ui.components.modals import ModalOverlay, show_input_modal, show_history_branch_modal, show_diag_modal, show_about_modal, show_search_results_modal, show_result_modal, BaseDialogMsg
 
 class GitFileModel(QFileSystemModel):
     def __init__(self, main_window):
@@ -61,39 +63,60 @@ class GitFileModel(QFileSystemModel):
                     original_icon.paint(painter, 16, 0, 16, 16)
                 
             painter.end()
-            
             return QIcon(pixmap)
             
         return super().data(index, role)
 
     def get_status(self, file_path):
         state = self.main_window.current_state
-        if not state or not state.isRepo: return None
+        if not state or not state.isRepo or not self.main_window.poller.repo_path:
+            return None
         
-        # 1. Standardize both to real absolute paths
         file_real = os.path.realpath(file_path).replace('\\', '/').lower()
         repo_real = os.path.realpath(self.main_window.poller.repo_path).replace('\\', '/').lower()
         
-        # 2. Try direct absolute realpath match (Matches absolute physical ID)
+        # 1. 直接绝对路径匹配
         if file_real in state.fileStatuses:
             return state.fileStatuses[file_real]
             
-        # 3. Try relative path match (Matches logical Git path)
+        # 2. 相对路径匹配
+        rel = ""
         try:
             rel = os.path.relpath(file_real, repo_real).replace('\\', '/').lower().strip('/')
-            if rel == '.' or rel == '': rel = ""
+            if rel == '.' or rel == '':
+                rel = ""
             if rel and rel in state.fileStatuses:
                 return state.fileStatuses[rel]
-        except:
+        except Exception:
             rel = ""
             
-        # 4. Aggressive Match for README (Handles root-level junction/case ghosting)
+        # 3. 针对 README 的兼容匹配
         name = os.path.basename(file_path).lower()
         if name == "readme.md":
             for k, v in state.fileStatuses.items():
-                if k.endswith("readme.md"): return v
+                if k.endswith("readme.md"):
+                    return v
+
+        # 4. 目录状态冒泡：若目录内含有修改，目录继承对应高优先状态
+        if os.path.isdir(file_path):
+            priority = {'unstaged': 3, 'staged': 2, 'untracked': 1}
+            best_status = None
+            best_priority = 0
             
-        # 5. Parent check (for folders)
+            prefix_abs = file_real.rstrip('/') + '/'
+            prefix_rel = (rel.rstrip('/') + '/') if rel else ""
+            
+            for path_key, status in state.fileStatuses.items():
+                norm = path_key.replace('\\', '/').lower()
+                if norm.startswith(prefix_abs) or (prefix_rel and norm.startswith(prefix_rel)):
+                    p = priority.get(status, 0)
+                    if p > best_priority:
+                        best_priority = p
+                        best_status = status
+            if best_status:
+                return best_status
+            
+        # 5. 父级状态继承（未跟踪或忽略目录向下传播）
         curr = file_real
         while len(curr) > len(repo_real):
             curr = os.path.dirname(curr).replace('\\', '/').lower()
@@ -118,7 +141,6 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._bind_signals()
         
-        # Initialization logic from config
         initial_path = self.panel.get_repo_path()
         if initial_path:
             self.change_repo(initial_path)
@@ -215,19 +237,17 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(self.btn_switch)
         
         header_layout.addSpacing(16)
-        
         header_layout.addLayout(right_layout)
-        
         main_layout.addLayout(header_layout)
         
-        # Top 40% area with Splitter (Graph View + File Tree View)
+        # Splitter (Graph View + File Tree View)
         top_splitter = QSplitter(Qt.Horizontal)
         self.graph = GraphView()
         
         right_panel = QWidget()
-        right_layout = QHBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(8)
+        right_tree_layout = QHBoxLayout(right_panel)
+        right_tree_layout.setContentsMargins(0, 0, 0, 0)
+        right_tree_layout.setSpacing(8)
         
         self.file_model = GitFileModel(self)
         self.file_model.setRootPath("")
@@ -242,18 +262,18 @@ class MainWindow(QMainWindow):
         self.file_tree.clicked.connect(self._on_file_clicked)
         self.file_tree.customContextMenuRequested.connect(self._show_context_menu)
             
-        right_layout.addWidget(self.file_tree, stretch=1)
+        right_tree_layout.addWidget(self.file_tree, stretch=1)
         
-        from PySide6.QtWidgets import QListWidget, QListWidgetItem, QSizePolicy
         legend_layout = QVBoxLayout()
         legend_layout.setContentsMargins(4, 4, 4, 4)
-        self.legend_labels = [] # List of (label_obj, i18n_key)
+        self.legend_labels = []
         
+        # 统一图例与文件树圆点完全对应
         legend_items = [
-            ("#9E9E9E", "file_clean"),
-            ("#F44336", "file_unstaged"),
-            ("#FFEB3B", "file_uncommitted"),
-            ("#4CAF50", "file_staged")
+            ("#4CAF50", "file_clean"),      # 绿：未修改
+            ("#F44336", "file_unstaged"),   # 红：未暂存
+            ("#FFEB3B", "file_staged"),     # 黄：已暂存
+            ("#9E9E9E", "file_untracked")   # 灰：未跟踪
         ]
         
         for color, key in legend_items:
@@ -277,15 +297,15 @@ class MainWindow(QMainWindow):
         
         logo_pixmap = QPixmap(get_resource_path("logo.png")).scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.logo_btn = AnimatedLogo(logo_pixmap)
-        self.logo_btn.clicked.connect(self._handle_cleanup)
+        # 解除 Logo 上的直接破坏性操作绑定，仅保留点击动画彩蛋
         legend_layout.addWidget(self.logo_btn, alignment=Qt.AlignLeft)
         
-        right_layout.addLayout(legend_layout)
+        right_tree_layout.addLayout(legend_layout)
         
         top_splitter.addWidget(self.graph)
         top_splitter.addWidget(right_panel)
         top_splitter.setStretchFactor(0, 6)
-        top_splitter.setStretchFactor(1, 4) # adjustable File Tree width
+        top_splitter.setStretchFactor(1, 4)
         
         main_layout.addWidget(top_splitter, stretch=4)
         
@@ -328,14 +348,14 @@ class MainWindow(QMainWindow):
         else:
             self.lbl_branch.setText(f"{tr('current_branch')}: -")
             
-        # Force the file tree to re-query DecorationRole for all visible items
-        root_idx = self.file_model.index(self.poller.repo_path)
-        rows = self.file_model.rowCount(root_idx)
-        if rows > 0:
-            top_left = self.file_model.index(0, 0, root_idx)
-            bottom_right = self.file_model.index(rows - 1, 0, root_idx)
-            self.file_model.dataChanged.emit(top_left, bottom_right, [Qt.DecorationRole])
-        self.file_tree.viewport().update()
+        if self.poller.repo_path:
+            root_idx = self.file_model.index(self.poller.repo_path)
+            rows = self.file_model.rowCount(root_idx)
+            if rows > 0:
+                top_left = self.file_model.index(0, 0, root_idx)
+                bottom_right = self.file_model.index(rows - 1, 0, root_idx)
+                self.file_model.dataChanged.emit(top_left, bottom_right, [Qt.DecorationRole])
+            self.file_tree.viewport().update()
 
     def changeEvent(self, event):
         if event.type() == QEvent.ActivationChange:
@@ -355,11 +375,11 @@ class MainWindow(QMainWindow):
         def do_switch(branch_name):
             out, err = self.actions.switch_branch(branch_name)
             if err:
-                show_result_modal(self.overlay, False, f"Switch blocked:\n\n{err}")
+                show_result_modal(self.overlay, False, f"{tr('switch_blocked')}:\n\n{err}")
                 return False
             else:
                 self.poller.trigger_update()
-                self.toast.show_message(f"Switched to {branch_name}")
+                self.toast.show_message(f"{tr('switched_to')}: {branch_name}")
                 return True
                 
         from ui.components.modals import show_branch_selection_modal
@@ -368,14 +388,9 @@ class MainWindow(QMainWindow):
     def _open_file(self, index):
         path = self.file_model.filePath(index)
         if os.path.isfile(path):
-            if os.name == 'nt':
-                os.startfile(path)
-            elif sys.platform == 'darwin':
-                import subprocess
-                subprocess.Popen(['open', path])
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def _on_file_clicked(self, index):
-        # Feature 'View File Diff' on click has been removed as per user request.
         pass
 
     def _perform_search(self):
@@ -388,7 +403,7 @@ class MainWindow(QMainWindow):
             return
             
         results = []
-        for line in out.split('\n'):
+        for line in out.splitlines():
             line = line.strip()
             if line and query in os.path.basename(line).lower():
                 results.append(line)
@@ -422,34 +437,64 @@ class MainWindow(QMainWindow):
         old_name = os.path.basename(old_path)
         
         def do_rename(new_name):
+            new_name = new_name.strip() if new_name else ""
             if not new_name or new_name == old_name:
                 return
-            new_path = os.path.join(os.path.dirname(old_path), new_name)
             
-            # Simplified rename as requested (ordinary OS rename)
+            # 路径穿越与合法性校验
+            if new_name != os.path.basename(new_name) or any(c in '<>:"/\\|?*' for c in new_name):
+                show_result_modal(self.overlay, False, tr("invalid_filename"))
+                return
+                
+            new_path = os.path.join(os.path.dirname(old_path), new_name)
+            if os.path.exists(new_path):
+                show_result_modal(self.overlay, False, tr("file_exists"))
+                return
+                
             try:
-                os.rename(old_path, new_path)
+                rel_old = os.path.relpath(old_path, self.poller.repo_path).replace('\\', '/')
+                rel_new = os.path.relpath(new_path, self.poller.repo_path).replace('\\', '/')
+                out, err = self.actions.run_cmd(["mv", rel_old, rel_new])
+                if err:
+                    os.rename(old_path, new_path)
                 self.poller.trigger_update()
                 self.toast.show_message(f"Renamed: {new_name}")
             except Exception as e:
-                
                 show_result_modal(self.overlay, False, f"Rename failed: {e}")
                 
-        from ui.components.modals import show_input_modal
         show_input_modal(self.overlay, tr("rename"), do_rename)
 
     def _delete_item(self, index):
         path = self.file_model.filePath(index)
+        if not path or not self.poller.repo_path:
+            return
+            
+        repo_abs = os.path.abspath(self.poller.repo_path)
+        path_abs = os.path.abspath(path)
+        
+        # 禁止删除仓库根目录
+        try:
+            if path_abs == repo_abs or os.path.samefile(path, self.poller.repo_path):
+                show_result_modal(self.overlay, False, tr("cannot_delete_root"))
+                return
+        except Exception:
+            if path_abs == repo_abs:
+                show_result_modal(self.overlay, False, tr("cannot_delete_root"))
+                return
+                
+        # 禁止删除非仓库内部文件
+        if not path_abs.startswith(repo_abs + os.sep):
+            show_result_modal(self.overlay, False, tr("cannot_delete_outside"))
+            return
+            
         name = os.path.basename(path)
         
         def do_delete():
             rel_path = os.path.relpath(path, self.poller.repo_path).replace('\\', '/')
-            # Try git rm first (use -r if directory)
-            args = ["rm", "-r", "--force", "--" , rel_path] if os.path.isdir(path) else ["rm", "--force", "--", rel_path]
+            args = ["rm", "-r", "--force", "--", rel_path] if os.path.isdir(path) else ["rm", "--force", "--", rel_path]
             out, err = self.actions.run_cmd(args)
             
             if err:
-                # Fallback to OS delete
                 try:
                     import shutil
                     if os.path.isdir(path):
@@ -459,12 +504,10 @@ class MainWindow(QMainWindow):
                     self.poller.trigger_update()
                     self.toast.show_message(f"Deleted: {name}")
                 except Exception as e:
-                    
                     show_result_modal(self.overlay, False, f"Delete failed: {e}")
             else:
                 self.toast.show_message(f"Git Deleted: {name}")
                 
-        from ui.components.modals import BaseDialogMsg
         msg = tr("delete_warning").format(name)
         dialog = BaseDialogMsg(tr("confirm_delete"), self.overlay)
         lbl = QLabel(msg)
@@ -476,14 +519,9 @@ class MainWindow(QMainWindow):
         self.overlay.show_animated()
 
     def _open_search_file(self, rel_path):
-        import os, sys
         full_path = os.path.join(self.poller.repo_path, rel_path)
         if os.path.isfile(full_path):
-            if os.name == 'nt':
-                os.startfile(full_path)
-            elif sys.platform == 'darwin':
-                import subprocess
-                subprocess.Popen(['open', full_path])
+            QDesktopServices.openUrl(QUrl.fromLocalFile(full_path))
 
     def _handle_panel_action(self, action, payload):
         if action == "change_repo":
@@ -491,7 +529,7 @@ class MainWindow(QMainWindow):
         elif action == "set_remote":
             out, err = self.actions.set_remote(payload["url"])
             if err:
-                show_result_modal(self.overlay, False, f"配置远端失败:\n\n{err}")
+                show_result_modal(self.overlay, False, f"{tr('config_remote_failed')}:\n\n{err}")
         elif action == "sync":
             out, err = self.actions.sync_latest()
             if err:
@@ -503,7 +541,6 @@ class MainWindow(QMainWindow):
                 name = name.strip()
                 is_valid, err_msg = self.actions.is_valid_branch_name(name)
                 if not is_valid:
-                    
                     show_result_modal(self.overlay, False, err_msg)
                     return
                 out, err = self.actions.create_branch(name)
@@ -516,7 +553,7 @@ class MainWindow(QMainWindow):
         elif action == "branch_history":
             if self.current_state:
                 out, err = self.actions.run_cmd(["log", "--all", "--oneline", "-n", "50"])
-                choices = out.split('\n') if out else []
+                choices = out.splitlines() if out else []
                 def do_branch_hist(name, hash_val):
                     o, e = self.actions.create_branch(name, hash_val)
                     if e:
@@ -540,7 +577,7 @@ class MainWindow(QMainWindow):
         elif action == "commit":
             def do_commit(msg):
                 if not msg.strip():
-                    show_result_modal(self.overlay, False, "Commit message cannot be empty!")
+                    show_result_modal(self.overlay, False, tr("commit_msg_empty"))
                     return
                 out, err = self.actions.commit(msg)
                 if err:
@@ -563,14 +600,32 @@ class MainWindow(QMainWindow):
                 else:
                     show_result_modal(self.overlay, True, tr("push_success"))
 
-    def _handle_cleanup(self):
-        self.cleanup_thread = CleanupThread(self.actions, self)
+    def _handle_cleanup_safe(self):
+        """显式安全清理入口（支持 dry-run 预览与二次确认）"""
+        out, err = self.actions.preview_cleanup()
+        if not out or not out.strip():
+            self.toast.show_message(tr("no_garbage"))
+            return
+            
+        dialog = BaseDialogMsg(tr("cleanup_title"), self.overlay)
+        warning_lbl = QLabel(tr("cleanup_warning"))
+        warning_lbl.setStyleSheet(f"color: {COLORS['error']}; font-weight: bold;")
+        warning_lbl.setWordWrap(True)
+        dialog.vbox.addWidget(warning_lbl)
         
-        def on_done(out, err):
-            self.toast.show_message("垃圾清理完成")
+        preview_lbl = QLabel(out[:400] + ("..." if len(out) > 400 else ""))
+        preview_lbl.setStyleSheet(f"color: {COLORS['text_disabled']}; font-size: 12px; font-family: Consolas;")
+        preview_lbl.setWordWrap(True)
+        dialog.vbox.addWidget(preview_lbl)
         
-        self.cleanup_thread.finished.connect(on_done)
-        self.cleanup_thread.start()
+        def confirm_cleanup():
+            self.cleanup_thread = CleanupThread(self.actions, self)
+            self.cleanup_thread.finished.connect(lambda o, e: self.toast.show_message(tr("cleanup_done")))
+            self.cleanup_thread.start()
+            
+        dialog.add_buttons(on_confirm=confirm_cleanup)
+        self.overlay.set_content(dialog)
+        self.overlay.show_animated()
 
     def _set_new_cloned_repo(self, new_dir):
         new_dir = new_dir.replace('\\', '/')
@@ -584,7 +639,6 @@ class MainWindow(QMainWindow):
         path = os.path.realpath(path).replace('\\', '/') if path else path
         if path and os.path.exists(path):
             if not os.path.exists(os.path.join(path, ".git")):
-                # Show empty folder interaction interceptor
                 def do_init():
                     self._setup_repo_path(path)
                     self.actions.init_repo()
@@ -592,9 +646,17 @@ class MainWindow(QMainWindow):
                     
                 def do_clone():
                     def perform_clone(url):
+                        url = url.strip()
                         self.panel.line_remote.setText(url)
                         self.panel.config["remote_url"] = url
-                        self.toast.show_message("正在克隆，请耐心等待...")
+                        self.toast.show_message(tr("cloning_wait"))
+                        
+                        # 记录克隆前的已有子文件夹与预期的仓库名
+                        match = re.search(r'/([^/]+?)(?:\.git)?$', url.rstrip('/'))
+                        expected_repo_name = match.group(1) if match else None
+                        existing_subdirs = set(
+                            d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))
+                        )
                         
                         from PySide6.QtCore import QThread, Signal
                         class CloneThread(QThread):
@@ -606,27 +668,52 @@ class MainWindow(QMainWindow):
                             def run(self):
                                 import subprocess, os
                                 cr = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-                                res = subprocess.run(["git", "clone", self.url], cwd=self.cwd, capture_output=True, text=True, creationflags=cr, encoding='utf-8', errors='replace')
+                                res = subprocess.run(
+                                    ["git", "clone", self.url],
+                                    cwd=self.cwd,
+                                    capture_output=True,
+                                    text=True,
+                                    creationflags=cr,
+                                    encoding='utf-8',
+                                    errors='replace'
+                                )
                                 self.res_ready.emit(res)
                                 
                         def on_clone_done(res):
                             if res.returncode == 0:
-                                dirs = [os.path.join(path, d) for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
-                                if len(dirs) >= 1:
-                                    # Choose the most recently created or the only dir
-                                    self._set_new_cloned_repo(dirs[-1])
-                                    self.toast.show_message("克隆成功")
+                                current_subdirs = set(
+                                    d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))
+                                )
+                                new_dirs = current_subdirs - existing_subdirs
+                                
+                                # 优先尝试新生成的目录
+                                if len(new_dirs) == 1:
+                                    target_dir = os.path.join(path, list(new_dirs)[0])
+                                    self._set_new_cloned_repo(target_dir)
+                                    self.toast.show_message(tr("clone_success"))
+                                    return
+                                    
+                                # 其次尝试从 URL 提取的预期项目名
+                                if expected_repo_name:
+                                    expected_full = os.path.join(path, expected_repo_name)
+                                    if os.path.isdir(expected_full):
+                                        self._set_new_cloned_repo(expected_full)
+                                        self.toast.show_message(tr("clone_success"))
+                                        return
+                                        
+                                # 目录判断不确定
+                                if len(current_subdirs) >= 1:
+                                    self.toast.show_message(tr("clone_dir_ambiguous"))
                                 else:
-                                    self.toast.show_message("克隆完成但找不到子文件夹")
+                                    self.toast.show_message(tr("clone_subfolder_not_found"))
                             else:
-                                show_result_modal(self.overlay, False, f"克隆失败:\n{res.stderr}")
+                                show_result_modal(self.overlay, False, f"{tr('clone_failed')}:\n{res.stderr}")
                                 
                         self._clone_thread = CloneThread(url, path, self)
                         self._clone_thread.res_ready.connect(on_clone_done)
                         self._clone_thread.start()
                         
-                    from ui.components.modals import show_input_modal
-                    show_input_modal(self.overlay, "请输入远程仓库URL", perform_clone)
+                    show_input_modal(self.overlay, tr("enter_remote_url"), perform_clone)
                     
                 from ui.components.modals import show_empty_folder_modal
                 show_empty_folder_modal(self.overlay, do_init, do_clone)

@@ -11,4 +11,5 @@ class GitState:
     commitHistory: list = field(default_factory=list)
     fileStatuses: dict = field(default_factory=dict)
     canUndo: bool = False
+    hasUpstream: bool = False
     

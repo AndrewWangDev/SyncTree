@@ -3,6 +3,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PySide6.QtCore import Qt, Signal
 import os
 import sys
+import shutil
 import subprocess
 import webbrowser
 
@@ -198,11 +199,16 @@ class PanelView(QWidget):
         path = self.line_local.text()
         if path and os.path.exists(path):
             if os.name == 'nt':
-                os.system(f'start cmd /K "cd /d {path}"')
+                creation = subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, 'CREATE_NEW_CONSOLE') else 0
+                subprocess.Popen(["cmd.exe", "/K", f"cd /d {path}"], creationflags=creation)
             elif sys.platform == 'darwin':
                 subprocess.Popen(["open", "-a", "Terminal", path])
             else:
-                subprocess.Popen(["x-terminal-emulator"], cwd=path)
+                terminals = [os.environ.get("TERMINAL"), "x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"]
+                for term in terminals:
+                    if term and shutil.which(term):
+                        subprocess.Popen([term], cwd=path)
+                        break
 
     def _clear_remote_url(self):
         self.line_remote.setText("")
@@ -214,9 +220,9 @@ class PanelView(QWidget):
         # State machine
         repo_ok = state.isRepo
         no_changes = not state.hasModified and not state.hasStaged
-        is_main = state.currentBranch in ("main", "master")
+        has_branch = bool(state.currentBranch)
         
-        self.btn_sync.setEnabled(repo_ok and no_changes and is_main)
+        self.btn_sync.setEnabled(bool(repo_ok and no_changes and has_branch))
         self.btn_task.setEnabled(repo_ok)
         self.btn_history.setEnabled(repo_ok and no_changes)
         
@@ -225,7 +231,9 @@ class PanelView(QWidget):
         self.btn_commit.setEnabled(repo_ok and state.hasStaged)
         
         self.btn_undo.setEnabled(repo_ok and state.canUndo)
-        self.btn_push.setEnabled(bool(repo_ok and (state.commitsAhead > 0 or state.currentBranch)))
+        
+        can_push = bool(repo_ok and has_branch and (state.commitsAhead > 0 or not state.hasUpstream))
+        self.btn_push.setEnabled(can_push)
         self._update_preview_state()
 
     def get_repo_path(self):
