@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QPushButton
-from PySide6.QtCore import Qt, QPoint, QPropertyAnimation, QEasingCurve, Property, QRectF, Signal
-from PySide6.QtGui import QPainter, QColor, QBrush, QPaintEvent, QPen, QPainterPath, QPixmap, QTransform
+from PySide6.QtCore import Qt, QPoint, QPropertyAnimation, QEasingCurve, Property, QRectF
+from PySide6.QtGui import QPainter, QColor, QBrush, QPaintEvent, QPen, QPainterPath, QPixmap
 from ui.theme import COLORS
 
 class MaterialButton(QPushButton):
@@ -53,7 +53,6 @@ class MaterialButton(QPushButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         
-        # Handle disabled opacity explicitly
         if not self.isEnabled():
             painter.setOpacity(0.3)
             
@@ -61,11 +60,9 @@ class MaterialButton(QPushButton):
         path = QPainterPath()
         path.addRoundedRect(QRectF(rect), 12, 12)
         
-        # Fill Background - Unify all to dark surface variant
         bg_color = QColor(COLORS["surface_variant"])
         painter.fillPath(path, QBrush(bg_color))
         
-        # Draw Ripple
         if self._ripple_opacity > 0:
             painter.setClipPath(path)
             ripple_color = QColor(COLORS["primary"])
@@ -75,7 +72,6 @@ class MaterialButton(QPushButton):
             painter.drawEllipse(self._ripple_center, self._ripple_radius, self._ripple_radius)
             painter.setClipping(False)
 
-        # Draw Text
         text_color = QColor(COLORS["text"])
         painter.setPen(QPen(text_color))
         font = self.font()
@@ -86,8 +82,6 @@ class MaterialButton(QPushButton):
         painter.end()
 
 class AnimatedLogo(QPushButton):
-    clicked = Signal()
-
     def __init__(self, pixmap, parent=None):
         super().__init__(parent)
         self.setFixedSize(100, 80)
@@ -96,6 +90,8 @@ class AnimatedLogo(QPushButton):
         
         self.pixmap = pixmap
         self._rotation = 0
+        self._cached_pixmap = None
+        self._cached_size = None
         
         self.anim = QPropertyAnimation(self, b"rotation")
         self.anim.setDuration(1200)
@@ -108,13 +104,13 @@ class AnimatedLogo(QPushButton):
         self._rotation = val
         self.update()
 
-    def mousePressEvent(self, e):
-        super().mousePressEvent(e)
-        if self.anim.state() == QPropertyAnimation.Stopped:
-            self.anim.setStartValue(0)
-            self.anim.setEndValue(720) # 2 rotations
-            self.anim.start()
-            self.clicked.emit()
+    def mouseReleaseEvent(self, e):
+        super().mouseReleaseEvent(e)
+        if self.rect().contains(e.position().toPoint()):
+            if self.anim.state() == QPropertyAnimation.Stopped:
+                self.anim.setStartValue(0)
+                self.anim.setEndValue(720) # 2 rotations
+                self.anim.start()
 
     def paintEvent(self, e):
         painter = QPainter(self)
@@ -126,13 +122,17 @@ class AnimatedLogo(QPushButton):
         painter.rotate(self._rotation)
         painter.translate(-center)
         
-        # Calculate aspect ratio preserving rect
         content_rect = self.rect().adjusted(4, 4, -4, -4)
-        scaled_pixmap = self.pixmap.scaled(content_rect.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        if self._cached_size != content_rect.size():
+            self._cached_pixmap = self.pixmap.scaled(
+                content_rect.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self._cached_size = content_rect.size()
         
-        # Center the scaled pixmap
-        x = (self.width() - scaled_pixmap.width()) // 2
-        y = (self.height() - scaled_pixmap.height()) // 2
-        
-        painter.drawPixmap(x, y, scaled_pixmap)
+        if self._cached_pixmap:
+            x = (self.width() - self._cached_pixmap.width()) // 2
+            y = (self.height() - self._cached_pixmap.height()) // 2
+            painter.drawPixmap(x, y, self._cached_pixmap)
         painter.end()

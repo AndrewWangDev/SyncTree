@@ -29,6 +29,7 @@ class ToastLabel(QWidget):
         self.anim = QPropertyAnimation(self.opacity_effect, b"opacity")
         self.anim.setDuration(300)
         self.anim.setEasingCurve(QEasingCurve.InOutQuad)
+        self.anim.finished.connect(self._on_anim_finished)
         
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
@@ -36,11 +37,14 @@ class ToastLabel(QWidget):
         
         self.hide()
 
+    def _on_anim_finished(self):
+        if self.opacity_effect.opacity() <= 0.01:
+            self.hide()
+
     def show_message(self, text, duration=2000):
         self.label.setText(text)
         self.adjustSize()
         
-        # Center at the bottom of the parent if exists
         if self.parent():
             parent_rect = self.parent().rect()
             pos_x = parent_rect.center().x() - self.width() // 2
@@ -60,5 +64,4 @@ class ToastLabel(QWidget):
         self.anim.stop()
         self.anim.setStartValue(self.opacity_effect.opacity())
         self.anim.setEndValue(0)
-        self.anim.finished.connect(self.hide)
         self.anim.start()
