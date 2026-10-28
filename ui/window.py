@@ -105,7 +105,7 @@ class GitFileModel(QFileSystemModel):
                     return state.dirStatuses[file_real]
                 if rel and rel in state.dirStatuses:
                     return state.dirStatuses[rel]
-                return None
+                # 不在变动目录集合中，继续向下判断父级继承，最终返回 'clean'，避免绿点异常消失
             else:
                 priority = {'conflicted': 4, 'unstaged': 3, 'staged': 2, 'untracked': 1}
                 best_status = None
@@ -279,7 +279,8 @@ class MainWindow(QMainWindow):
             ("#4CAF50", "file_clean"),      # 绿：未修改
             ("#F44336", "file_unstaged"),   # 红：未暂存
             ("#FFEB3B", "file_staged"),     # 黄：已暂存
-            ("#9E9E9E", "file_untracked")   # 灰：未跟踪
+            ("#9E9E9E", "file_untracked"),  # 灰：未跟踪
+            ("#FF5722", "file_conflicted")  # 橙：冲突未解决
         ]
         
         for color, key in legend_items:
@@ -391,7 +392,7 @@ class MainWindow(QMainWindow):
         from ui.components.modals import show_branch_selection_modal
         show_branch_selection_modal(self.overlay, tr("switch_branch"), choices, do_switch)
 
-    BLOCKED_EXTS = {'.exe', '.bat', '.cmd', '.ps1', '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh', '.msc', '.com', '.scr', '.pif', '.sh', '.bash', '.app', '.command'}
+    BLOCKED_EXTS = {'.exe', '.bat', '.cmd', '.ps1', '.vbs', '.vbe', '.jse', '.wsf', '.wsh', '.msc', '.com', '.scr', '.pif'}
 
     def _safe_open_file(self, full_path):
         if not full_path or not os.path.isfile(full_path):
@@ -684,19 +685,40 @@ class MainWindow(QMainWindow):
                                 super().__init__(parent)
                                 self.url = c_url
                                 self.cwd = c_cwd
+                                self.proc = None
+
                             def run(self):
                                 import subprocess, os
                                 cr = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-                                res = subprocess.run(
-                                    ["git", "clone", self.url],
-                                    cwd=self.cwd,
-                                    capture_output=True,
-                                    text=True,
-                                    creationflags=cr,
-                                    encoding='utf-8',
-                                    errors='replace'
-                                )
-                                self.res_ready.emit(res)
+                                try:
+                                    self.proc = subprocess.Popen(
+                                        ["git", "clone", self.url],
+                                        cwd=self.cwd,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE,
+                                        text=True,
+                                        creationflags=cr,
+                                        encoding='utf-8',
+                                        errors='replace'
+                                    )
+                                    out, err = self.proc.communicate()
+                                    from collections import namedtuple
+                                    Result = namedtuple("Result", ["returncode", "stdout", "stderr"])
+                                    self.res_ready.emit(Result(self.proc.returncode, out, err))
+                                except Exception as e:
+                                    from collections import namedtuple
+                                    Result = namedtuple("Result", ["returncode", "stdout", "stderr"])
+                                    self.res_ready.emit(Result(1, "", str(e)))
+
+                            def cancel(self):
+                                if self.proc and self.proc.poll() is None:
+                                    try:
+                                        self.proc.terminate()
+                                    except Exception:
+                                        try:
+                                            self.proc.kill()
+                                        except Exception:
+                                            pass
                                 
                         def on_clone_done(res):
                             if res.returncode == 0:
@@ -761,6 +783,8 @@ class MainWindow(QMainWindow):
         self.poller.stop()
         self.poller.wait()
         if hasattr(self, '_clone_thread') and self._clone_thread and self._clone_thread.isRunning():
+            if hasattr(self._clone_thread, 'cancel'):
+                self._clone_thread.cancel()
             self._clone_thread.quit()
             self._clone_thread.wait(1000)
         if hasattr(self, 'cleanup_thread') and self.cleanup_thread and self.cleanup_thread.isRunning():

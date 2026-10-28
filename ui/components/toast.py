@@ -5,8 +5,10 @@ from ui.theme import COLORS
 class ToastLabel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
+        if not parent:
+            self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         
         self.label = QLabel()
         self.label.setStyleSheet(f"""
@@ -46,10 +48,10 @@ class ToastLabel(QWidget):
         self.adjustSize()
         
         if self.parent():
-            parent_rect = self.parent().rect()
-            pos_x = parent_rect.center().x() - self.width() // 2
-            pos_y = parent_rect.bottom() - self.height() - 40
-            self.move(self.parent().mapToGlobal(self.parent().rect().topLeft()) + QPoint(pos_x, pos_y))
+            pos_x = (self.parent().width() - self.width()) // 2
+            pos_y = self.parent().height() - self.height() - 40
+            self.move(pos_x, pos_y)
+            self.raise_()
             
         self.show()
         
