@@ -59,7 +59,7 @@ def test_poll_git_state_detection(temp_repo):
     state = poller._poll_git()
     assert state.hasStaged is False
     assert state.hasModified is False
-    assert state.canUndo is False # 仅1次提交无父提交
+    assert state.canUndo is True # 拥有第1个提交，支持撤销初始提交
     
     # 修改该文件成为未暂存
     with open(f1, "a") as f:

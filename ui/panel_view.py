@@ -200,15 +200,19 @@ class PanelView(QWidget):
         if path and os.path.exists(path):
             if os.name == 'nt':
                 creation = subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, 'CREATE_NEW_CONSOLE') else 0
-                subprocess.Popen(["cmd.exe", "/K", f"cd /d {path}"], creationflags=creation)
+                subprocess.Popen(["cmd.exe"], cwd=path, creationflags=creation)
             elif sys.platform == 'darwin':
                 subprocess.Popen(["open", "-a", "Terminal", path])
             else:
                 terminals = [os.environ.get("TERMINAL"), "x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"]
+                opened = False
                 for term in terminals:
                     if term and shutil.which(term):
                         subprocess.Popen([term], cwd=path)
+                        opened = True
                         break
+                if not opened:
+                    self.action_requested.emit("terminal_error", {"msg": "No supported terminal emulator found."})
 
     def _clear_remote_url(self):
         self.line_remote.setText("")
@@ -219,8 +223,22 @@ class PanelView(QWidget):
     def update_state(self, state):
         # State machine
         repo_ok = state.isRepo
-        no_changes = not state.hasModified and not state.hasStaged
         has_branch = bool(state.currentBranch)
+        
+        # Merge conflict state machine branch: lock navigation and dangerous actions, allow staging and committing resolved files
+        if getattr(state, "hasConflict", False):
+            self.btn_sync.setEnabled(False)
+            self.btn_push.setEnabled(False)
+            self.btn_task.setEnabled(False)
+            self.btn_history.setEnabled(False)
+            self.btn_stage.setEnabled(True)
+            self.btn_unstage.setEnabled(state.hasStaged)
+            self.btn_commit.setEnabled(state.hasStaged)
+            self.btn_undo.setEnabled(False)
+            self._update_preview_state()
+            return
+
+        no_changes = not state.hasModified and not state.hasStaged
         
         self.btn_sync.setEnabled(bool(repo_ok and no_changes and has_branch))
         self.btn_task.setEnabled(repo_ok)
