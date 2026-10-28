@@ -59,11 +59,9 @@ def test_terminal_open_special_characters():
         args, kwargs = mock_popen.call_args
         cmd_args = args[0]
         
-        # 验证传入的是参数列表，且在 Windows 下使用 cmd.exe /K
+        # 验证传入的是安全参数列表，在 Windows 下直接以 cwd 传递路径避免命令注入
         if os.name == 'nt':
             assert isinstance(cmd_args, list)
-            assert cmd_args[0] == "cmd.exe"
-            assert cmd_args[1] == "/K"
-            assert special_path in cmd_args[2]
-            # 确保没有使用 shell=True
+            assert cmd_args == ["cmd.exe"]
+            assert kwargs.get("cwd") == special_path
             assert kwargs.get("shell") is not True

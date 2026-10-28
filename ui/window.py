@@ -45,7 +45,8 @@ class GitFileModel(QFileSystemModel):
                 'clean': "#4CAF50",      # Bright Green
                 'untracked': "#9E9E9E",  # Brighter Grey
                 'unstaged': "#F44336",   # Bright Red
-                'staged': "#FFEB3B"      # Bright Yellow
+                'staged': "#FFEB3B",     # Bright Yellow
+                'conflicted': "#FF5722", # Deep Orange / Conflict
             }
             color_hex = color_map.get(status, "#9E9E9E")
             
@@ -97,24 +98,29 @@ class GitFileModel(QFileSystemModel):
                 if k.endswith("readme.md"):
                     return v
 
-        # 4. 目录状态冒泡：若目录内含有修改，目录继承对应高优先状态
+        # 4. 目录状态冒泡：利用 state.dirStatuses 进行 O(1) 检索，兼顾测试/mock对象的全量冒泡
         if os.path.isdir(file_path):
-            priority = {'unstaged': 3, 'staged': 2, 'untracked': 1}
-            best_status = None
-            best_priority = 0
-            
-            prefix_abs = file_real.rstrip('/') + '/'
-            prefix_rel = (rel.rstrip('/') + '/') if rel else ""
-            
-            for path_key, status in state.fileStatuses.items():
-                norm = path_key.replace('\\', '/').lower()
-                if norm.startswith(prefix_abs) or (prefix_rel and norm.startswith(prefix_rel)):
-                    p = priority.get(status, 0)
-                    if p > best_priority:
-                        best_priority = p
-                        best_status = status
-            if best_status:
-                return best_status
+            if state.dirStatuses:
+                if file_real in state.dirStatuses:
+                    return state.dirStatuses[file_real]
+                if rel and rel in state.dirStatuses:
+                    return state.dirStatuses[rel]
+                return None
+            else:
+                priority = {'conflicted': 4, 'unstaged': 3, 'staged': 2, 'untracked': 1}
+                best_status = None
+                best_priority = 0
+                prefix_abs = file_real.rstrip('/') + '/'
+                prefix_rel = (rel.rstrip('/') + '/') if rel else ""
+                for path_key, status in state.fileStatuses.items():
+                    norm = path_key.replace('\\', '/').lower()
+                    if norm.startswith(prefix_abs) or (prefix_rel and norm.startswith(prefix_rel)):
+                        p = priority.get(status, 0)
+                        if p > best_priority:
+                            best_priority = p
+                            best_status = status
+                if best_status:
+                    return best_status
             
         # 5. 父级状态继承（未跟踪或忽略目录向下传播）
         curr = file_real
@@ -385,10 +391,20 @@ class MainWindow(QMainWindow):
         from ui.components.modals import show_branch_selection_modal
         show_branch_selection_modal(self.overlay, tr("switch_branch"), choices, do_switch)
 
+    BLOCKED_EXTS = {'.exe', '.bat', '.cmd', '.ps1', '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh', '.msc', '.com', '.scr', '.pif', '.sh', '.bash', '.app', '.command'}
+
+    def _safe_open_file(self, full_path):
+        if not full_path or not os.path.isfile(full_path):
+            return
+        ext = os.path.splitext(full_path)[1].lower()
+        if ext in self.BLOCKED_EXTS:
+            show_result_modal(self.overlay, False, tr("executable_blocked_warning"))
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(full_path))
+
     def _open_file(self, index):
         path = self.file_model.filePath(index)
-        if os.path.isfile(path):
-            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        self._safe_open_file(path)
 
     def _on_file_clicked(self, index):
         pass
@@ -439,17 +455,17 @@ class MainWindow(QMainWindow):
         def do_rename(new_name):
             new_name = new_name.strip() if new_name else ""
             if not new_name or new_name == old_name:
-                return
+                return False
             
             # 路径穿越与合法性校验
             if new_name != os.path.basename(new_name) or any(c in '<>:"/\\|?*' for c in new_name):
                 show_result_modal(self.overlay, False, tr("invalid_filename"))
-                return
+                return False
                 
             new_path = os.path.join(os.path.dirname(old_path), new_name)
             if os.path.exists(new_path):
                 show_result_modal(self.overlay, False, tr("file_exists"))
-                return
+                return False
                 
             try:
                 rel_old = os.path.relpath(old_path, self.poller.repo_path).replace('\\', '/')
@@ -459,8 +475,10 @@ class MainWindow(QMainWindow):
                     os.rename(old_path, new_path)
                 self.poller.trigger_update()
                 self.toast.show_message(f"Renamed: {new_name}")
+                return True
             except Exception as e:
                 show_result_modal(self.overlay, False, f"Rename failed: {e}")
+                return False
                 
         show_input_modal(self.overlay, tr("rename"), do_rename)
 
@@ -469,21 +487,21 @@ class MainWindow(QMainWindow):
         if not path or not self.poller.repo_path:
             return
             
-        repo_abs = os.path.abspath(self.poller.repo_path)
-        path_abs = os.path.abspath(path)
+        repo_real = os.path.normcase(os.path.realpath(self.poller.repo_path))
+        path_real = os.path.normcase(os.path.realpath(path))
         
         # 禁止删除仓库根目录
+        if path_real == repo_real:
+            show_result_modal(self.overlay, False, tr("cannot_delete_root"))
+            return
+            
+        # 禁止删除非仓库内部文件 (防范符号链接与大小写逃逸)
         try:
-            if path_abs == repo_abs or os.path.samefile(path, self.poller.repo_path):
-                show_result_modal(self.overlay, False, tr("cannot_delete_root"))
+            common = os.path.normcase(os.path.commonpath([repo_real, path_real]))
+            if common != repo_real:
+                show_result_modal(self.overlay, False, tr("cannot_delete_outside"))
                 return
-        except Exception:
-            if path_abs == repo_abs:
-                show_result_modal(self.overlay, False, tr("cannot_delete_root"))
-                return
-                
-        # 禁止删除非仓库内部文件
-        if not path_abs.startswith(repo_abs + os.sep):
+        except ValueError:
             show_result_modal(self.overlay, False, tr("cannot_delete_outside"))
             return
             
@@ -520,8 +538,7 @@ class MainWindow(QMainWindow):
 
     def _open_search_file(self, rel_path):
         full_path = os.path.join(self.poller.repo_path, rel_path)
-        if os.path.isfile(full_path):
-            QDesktopServices.openUrl(QUrl.fromLocalFile(full_path))
+        self._safe_open_file(full_path)
 
     def _handle_panel_action(self, action, payload):
         if action == "change_repo":
@@ -536,13 +553,15 @@ class MainWindow(QMainWindow):
                 show_result_modal(self.overlay, False, f"{tr('sync_failed')}\n\n{err}", lambda: show_diag_modal(self.overlay))
             else:
                 show_result_modal(self.overlay, True, tr("sync_success"))
+        elif action == "terminal_error":
+            show_result_modal(self.overlay, False, payload.get("msg", "Terminal launch failed."))
         elif action == "branch":
             def do_branch(name):
                 name = name.strip()
                 is_valid, err_msg = self.actions.is_valid_branch_name(name)
                 if not is_valid:
                     show_result_modal(self.overlay, False, err_msg)
-                    return
+                    return False
                 out, err = self.actions.create_branch(name)
                 if err:
                     show_result_modal(self.overlay, False, f"Failed: {err}")
@@ -552,7 +571,7 @@ class MainWindow(QMainWindow):
             show_input_modal(self.overlay, tr("enter_task_name"), do_branch)
         elif action == "branch_history":
             if self.current_state:
-                out, err = self.actions.run_cmd(["log", "--all", "--oneline", "-n", "50"])
+                out, err = self.actions.run_cmd(["log", "--all", "--oneline", "--no-color", "-n", "50"])
                 choices = out.splitlines() if out else []
                 def do_branch_hist(name, hash_val):
                     o, e = self.actions.create_branch(name, hash_val)
@@ -578,7 +597,7 @@ class MainWindow(QMainWindow):
             def do_commit(msg):
                 if not msg.strip():
                     show_result_modal(self.overlay, False, tr("commit_msg_empty"))
-                    return
+                    return False
                 out, err = self.actions.commit(msg)
                 if err:
                     show_result_modal(self.overlay, False, f"{tr('commit_failed')}\n\n{err}")
@@ -728,6 +747,7 @@ class MainWindow(QMainWindow):
             
     def _setup_repo_path(self, path):
         path = os.path.normpath(path)
+        self.poller.reset_watcher()
         self.poller.repo_path = path
         self.file_model.setRootPath(path)
         self.file_tree.setRootIndex(self.file_model.index(path))
@@ -740,4 +760,10 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self.poller.stop()
         self.poller.wait()
+        if hasattr(self, '_clone_thread') and self._clone_thread and self._clone_thread.isRunning():
+            self._clone_thread.quit()
+            self._clone_thread.wait(1000)
+        if hasattr(self, 'cleanup_thread') and self.cleanup_thread and self.cleanup_thread.isRunning():
+            self.cleanup_thread.quit()
+            self.cleanup_thread.wait(1000)
         super().closeEvent(event)

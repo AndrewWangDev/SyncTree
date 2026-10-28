@@ -1,14 +1,15 @@
 import webbrowser
 import re
+import subprocess
+import os
 from PySide6.QtCore import QThread, Signal
-from core.git_utils import GitPoller
+from core.git_utils import GitPoller, GitRepoLock
 
 class GitActions:
     def __init__(self, poller: GitPoller):
         self.poller = poller
 
     def run_cmd(self, args, get_stderr=False):
-        import subprocess, os
         repo_path = self.poller.repo_path
         if not repo_path or not os.path.exists(repo_path):
             return None, "No repo"
@@ -19,6 +20,8 @@ class GitActions:
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = subprocess.SW_HIDE
 
+        # 获取全局仓库锁，排他执行前台命令
+        GitRepoLock.lock()
         try:
             result = subprocess.run(
                 ["git", "--no-pager"] + args,
@@ -39,24 +42,32 @@ class GitActions:
             return result.stdout.strip(), None
         except Exception as e:
             return None, str(e)
+        finally:
+            GitRepoLock.unlock()
 
     def init_repo(self):
         return self.run_cmd(["init"])
 
-    def set_remote(self, url):
-        url = url.strip() if url else ""
+    def get_remotes(self):
         out, err = self.run_cmd(["remote"])
-        has_origin = (err is None and out is not None and "origin" in out)
+        if err or not out:
+            return []
+        return [r.strip() for r in out.splitlines() if r.strip()]
+
+    def set_remote(self, url, remote_name="origin"):
+        url = url.strip() if url else ""
+        remotes = self.get_remotes()
+        has_remote = remote_name in remotes
 
         if not url:
-            if has_origin:
-                return self.run_cmd(["remote", "remove", "origin"])
+            if has_remote:
+                return self.run_cmd(["remote", "remove", remote_name])
             return "", None
 
-        if has_origin:
-            return self.run_cmd(["remote", "set-url", "origin", url])
+        if has_remote:
+            return self.run_cmd(["remote", "set-url", remote_name, url])
         else:
-            return self.run_cmd(["remote", "add", "origin", url])
+            return self.run_cmd(["remote", "add", remote_name, url])
 
     def sync_latest(self, branch=None):
         if not branch:
@@ -67,7 +78,10 @@ class GitActions:
                     return self.run_cmd(["pull", parts[0], parts[1]])
             current, _ = self.run_cmd(["branch", "--show-current"])
             branch = current if current else "main"
-        return self.run_cmd(["pull", "origin", branch])
+            
+        remotes = self.get_remotes()
+        remote_name = "origin" if "origin" in remotes else (remotes[0] if remotes else "origin")
+        return self.run_cmd(["pull", remote_name, branch])
 
     def create_branch(self, name, commit_hash=None):
         if commit_hash:
@@ -104,14 +118,19 @@ class GitActions:
         return self.run_cmd(["reset", "--soft", "HEAD^"])
 
     def push(self, branch):
-        out, err = self.run_cmd(["push", "-u", "origin", branch], get_stderr=True)
+        remotes = self.get_remotes()
+        remote_name = "origin" if "origin" in remotes else (remotes[0] if remotes else "origin")
+        out, err = self.run_cmd(["push", "-u", remote_name, branch], get_stderr=True)
         if out is None:
             return None, err
         output = (out or "") + "\n" + (err or "")
         match = re.search(r'https?://[^\s]+/(?:pull/new|merge_requests/new)[^\s]*', output)
         if match:
-            url = match.group(0)
-            webbrowser.open(url)
+            url = re.sub(r'[.,);"\']+$', '', match.group(0))
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
         return out, None
 
     def diff_file(self, file_path, staged=False):
