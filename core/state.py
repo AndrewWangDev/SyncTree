@@ -10,6 +10,8 @@ class GitState:
     branches: list = field(default_factory=list)
     commitHistory: list = field(default_factory=list)
     fileStatuses: dict = field(default_factory=dict)
+    dirStatuses: dict = field(default_factory=dict)
     canUndo: bool = False
     hasUpstream: bool = False
-    
+    hasConflict: bool = False
+    conflictFiles: list = field(default_factory=list)

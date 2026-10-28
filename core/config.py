@@ -21,7 +21,8 @@ def get_config_path():
     # 优先使用用户配置目录
     target_path = os.path.join(get_config_dir(), "config.json")
     # 如果目标目录文件尚不存在但工作目录有旧 config.json，执行平滑迁移
-    local_path = "config.json"
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    local_path = os.path.join(project_root, "config.json")
     if not os.path.exists(target_path) and os.path.exists(local_path):
         try:
             with open(local_path, 'r', encoding='utf-8') as f:

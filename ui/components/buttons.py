@@ -60,19 +60,26 @@ class MaterialButton(QPushButton):
         path = QPainterPath()
         path.addRoundedRect(QRectF(rect), 12, 12)
         
-        bg_color = QColor(COLORS["surface_variant"])
+        if self.is_primary:
+            bg_color = QColor(COLORS["primary"])
+            text_color = QColor(COLORS["on_primary"])
+            ripple_color_base = "#FFFFFF"
+        else:
+            bg_color = QColor(COLORS["surface_variant"])
+            text_color = QColor(COLORS["text"])
+            ripple_color_base = COLORS["primary"]
+
         painter.fillPath(path, QBrush(bg_color))
         
         if self._ripple_opacity > 0:
             painter.setClipPath(path)
-            ripple_color = QColor(COLORS["primary"])
+            ripple_color = QColor(ripple_color_base)
             ripple_color.setAlphaF(self._ripple_opacity)
             painter.setBrush(QBrush(ripple_color))
             painter.setPen(Qt.NoPen)
             painter.drawEllipse(self._ripple_center, self._ripple_radius, self._ripple_radius)
             painter.setClipping(False)
 
-        text_color = QColor(COLORS["text"])
         painter.setPen(QPen(text_color))
         font = self.font()
         font.setWeight(font.Weight.Medium if self.is_primary else font.Weight.Normal)

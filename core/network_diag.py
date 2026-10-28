@@ -9,17 +9,38 @@ class EnvDiagThread(QThread):
     
     def check_git_user(self):
         try:
-            res = subprocess.run(
+            creation = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            res_name = subprocess.run(
                 ["git", "config", "user.name"],
                 capture_output=True,
                 text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                creationflags=creation
             )
-            if res.stdout.strip():
+            res_email = subprocess.run(
+                ["git", "config", "user.email"],
+                capture_output=True,
+                text=True,
+                creationflags=creation
+            )
+            if res_name.stdout.strip() and res_email.stdout.strip():
                 return 1, tr("diag_user_yes")
         except Exception:
             pass
         return 2, tr("diag_user_no")
+
+    def check_local_nic(self):
+        try:
+            if self.ping_ip("127.0.0.1"):
+                return True
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            s.close()
+            return True
+        except Exception:
+            try:
+                return socket.gethostbyname("localhost") == "127.0.0.1"
+            except Exception:
+                return False
 
     def check_ssh(self):
         creation = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
@@ -72,7 +93,7 @@ class EnvDiagThread(QThread):
 
         # 0: NIC 本地网卡测试
         self.step_updated.emit(0, 0, "")
-        if self.ping_ip("127.0.0.1") or self.check_port("127.0.0.1", 0):
+        if self.check_local_nic():
             self.step_updated.emit(0, 1, "")
             
             # 1: DNS 解析测试
@@ -106,10 +127,10 @@ class EnvDiagThread(QThread):
                     self.step_updated.emit(2, 2, "")
                     self.step_updated.emit(3, 2, "")
                 
-                # 4: GFW 检测 (探测国际网络 google.com:443)
+                # 4: GitHub API 连通性测试 (探测 api.github.com:443)
                 self.step_updated.emit(4, 0, "")
-                ok_g, g_ip = self.resolve_dns("google.com")
-                if ok_g and (self.check_port(g_ip, 443, timeout=2) or self.ping_ip(g_ip)):
+                ok_g, g_ip = self.resolve_dns("api.github.com")
+                if ok_g and (self.check_port(g_ip, 443, timeout=3) or self.ping_ip(g_ip)):
                     self.step_updated.emit(4, 1, "")
                 else:
                     self.setProperty("err_gfw", True)
