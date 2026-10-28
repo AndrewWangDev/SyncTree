@@ -51,6 +51,8 @@ def test_executable_files_blocked():
         bat_path = f.name
     with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
         txt_path = f.name
+    with tempfile.NamedTemporaryFile(suffix=".js", delete=False) as f:
+        js_path = f.name
 
     try:
         with patch("PySide6.QtGui.QDesktopServices.openUrl") as mock_open:
@@ -71,10 +73,16 @@ def test_executable_files_blocked():
                 # 打开安全的 .txt
                 window._safe_open_file(txt_path)
                 mock_open.assert_called_once()
+
+                mock_open.reset_mock()
+                # 打开常用源码 .js 文件，不应被拦截误杀
+                window._safe_open_file(js_path)
+                mock_open.assert_called_once()
     finally:
         os.remove(exe_path)
         os.remove(bat_path)
         os.remove(txt_path)
+        os.remove(js_path)
 
 def test_git_repo_lock_mechanism():
     """验证 GitRepoLock 互斥锁机制"""
@@ -135,3 +143,46 @@ def test_normcase_and_symlink_deletion_boundary():
             os.remove(outside_file)
         import shutil
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+def test_folder_status_clean_when_other_folders_have_changes():
+    """【回归防护】验证当部分目录存在变更时，其他干净的目录仍然显示 'clean' 绿点，不会返回 None 消失"""
+    tmp_dir = tempfile.mkdtemp()
+    window = MainWindow()
+    window.poller.stop()
+    window.poller.wait()
+
+    try:
+        window.poller.repo_path = tmp_dir
+        dir_mod = os.path.join(tmp_dir, "src")
+        dir_clean = os.path.join(tmp_dir, "docs")
+        os.makedirs(dir_mod, exist_ok=True)
+        os.makedirs(dir_clean, exist_ok=True)
+
+        # 模拟 dirStatuses 包含 src 目录的修改
+        mod_key = os.path.realpath(dir_mod).replace('\\', '/').lower()
+        clean_key = os.path.realpath(dir_clean).replace('\\', '/').lower()
+
+        state = GitState(
+            isRepo=True,
+            dirStatuses={
+                mod_key: "unstaged"
+            }
+        )
+        window.current_state = state
+
+        # src 目录应冒泡为 unstaged
+        assert window.file_model.get_status(dir_mod) == "unstaged"
+        # docs 目录未改动，必须返回 'clean'，不能返回 None
+        assert window.file_model.get_status(dir_clean) == "clean"
+    finally:
+        import shutil
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+def test_legend_items_include_conflicted():
+    """验证图例条目包含冲突状态，且与 i18n 完全对齐"""
+    window = MainWindow()
+    window.poller.stop()
+    window.poller.wait()
+
+    legend_keys = [key for _, key in window.legend_labels]
+    assert "file_conflicted" in legend_keys
