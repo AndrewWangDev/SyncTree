@@ -174,9 +174,12 @@ class GitPoller(QThread):
                     if len(line) < 2:
                         continue
                     code = line[0:2]
-                    rel_path = line[3:].strip()
-                    if rel_path.startswith('"') and rel_path.endswith('"'):
-                        rel_path = rel_path[1:-1]
+                    raw_path = line[3:].strip()
+                    if " -> " in raw_path:
+                        _, new_part = raw_path.split(" -> ", 1)
+                        rel_path = new_part.strip().strip('"')
+                    else:
+                        rel_path = raw_path.strip().strip('"')
                     
                     abs_path = os.path.realpath(os.path.join(self.repo_path, rel_path)).replace('\\', '/').lower()
                     rel_key = rel_path.replace('\\', '/').lower().strip('/')
