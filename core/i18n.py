@@ -1,4 +1,3 @@
-from PySide6.QtCore import QObject, Signal
 
 i18n_dict = {
     "zh": {
@@ -267,12 +266,29 @@ i18n_dict = {
     }
 }
 
-class LanguageManager(QObject):
-    language_changed = Signal(str)
-
+class _LanguageChangedSignal:
     def __init__(self):
-        super().__init__()
+        self._listeners = []
+
+    def connect(self, callback):
+        if callback not in self._listeners:
+            self._listeners.append(callback)
+
+    def disconnect(self, callback):
+        if callback in self._listeners:
+            self._listeners.remove(callback)
+
+    def emit(self, val):
+        for cb in list(self._listeners):
+            try:
+                cb(val)
+            except Exception:
+                pass
+
+class LanguageManager:
+    def __init__(self):
         self.current_lang = "zh"
+        self.language_changed = _LanguageChangedSignal()
 
     def toggle(self):
         self.current_lang = "en" if self.current_lang == "zh" else "zh"

@@ -76,11 +76,13 @@ jobs:
 
       - name: Execute Automated Test Suite (Linux Xvfb)
         if: runner.os == 'Linux'
+        env:
+          QT_QPA_PLATFORM: xcb
         run: |
           if [ "${{ matrix.python-version }}" = "3.11" ]; then
-            xvfb-run -a python -m pytest tests -v --cov=core --cov=ui --cov-report=xml
+            xvfb-run -a --server-args="-screen 0 1024x768x24" python -m pytest tests -v --cov=core --cov=ui --cov-report=xml
           else
-            xvfb-run -a python -m pytest tests -v
+            xvfb-run -a --server-args="-screen 0 1024x768x24" python -m pytest tests -v
           fi
 
       - name: Execute Automated Test Suite (Windows & macOS)
