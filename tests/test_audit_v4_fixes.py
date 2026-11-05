@@ -4,7 +4,7 @@ import shutil
 import tempfile
 import pytest
 from unittest.mock import patch, MagicMock
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtWidgets import QApplication
 
 from core.i18n import lang_manager
 from core.git_utils import GitPoller
@@ -14,15 +14,17 @@ from ui.window import MainWindow
 def test_close_event_unsets_file_tree_model():
     """【BUG-01 验证】closeEvent 必须正确解绑 self.file_tree 的 Model，避免底层悬挂指针"""
     window = MainWindow()
-    window.poller.stop()
-    window.poller.wait()
-
-    assert window.file_tree.model() is not None
-    
-    # 模拟窗口关闭
-    window.closeEvent(QCloseEvent())
-    
-    assert window.file_tree.model() is None
+    try:
+        window.poller.stop()
+        window.poller.wait()
+        assert window.file_tree.model() is not None
+        
+        window.close()
+        assert window.file_tree.model() is None
+    finally:
+        window.deleteLater()
+        if QApplication.instance():
+            QApplication.instance().processEvents()
 
 
 def test_language_manager_weak_reference_allows_gc():
@@ -102,11 +104,11 @@ def test_clone_cancel_and_error_clean_subdirs():
         os.makedirs(pre_existing, exist_ok=True)
         existing_subdirs = { "existing_repo" }
         
-        # 模拟 CloneThread 启动后创建了半成品目标目录
+        # 模拟 Clone 过程中创建了半成品目标目录
         broken_dir = os.path.join(tmp_parent, "cloned_repo")
         os.makedirs(os.path.join(broken_dir, ".git"), exist_ok=True)
         
-        # 验证清理机制
+        # 模拟取消或失败时的清理逻辑
         current_subdirs = set(os.listdir(tmp_parent))
         new_dirs = current_subdirs - existing_subdirs
         assert "cloned_repo" in new_dirs
