@@ -14,3 +14,12 @@ def qapp():
     if app is None:
         app = QApplication(["synctree-test"])
     yield app
+    app.processEvents()
+
+@pytest.fixture(autouse=True)
+def process_events_after_test():
+    """Process pending Qt events after each test to prevent object buildup."""
+    yield
+    app = QApplication.instance()
+    if app:
+        app.processEvents()
