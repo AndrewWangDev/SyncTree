@@ -114,6 +114,8 @@ def test_file_tree_folder_status_bubbling():
             f.write("content")
             
         window = MainWindow()
+        window.poller.stop()
+        window.poller.wait()
         window.poller.repo_path = tmp_dir
         
         deep_key = os.path.realpath(deep_file).replace('\\', '/').lower()

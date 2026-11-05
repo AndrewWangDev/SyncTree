@@ -45,7 +45,7 @@ class GitPoller(QThread):
         self._last_head_hash = None
         self._last_branch = None
 
-        self.watcher = QFileSystemWatcher()
+        self.watcher = QFileSystemWatcher(self)
         self.watcher.directoryChanged.connect(lambda _: self.trigger_update())
         self.watcher.fileChanged.connect(lambda _: self.trigger_update())
         self._update_watcher_paths.connect(self._do_update_watcher)
