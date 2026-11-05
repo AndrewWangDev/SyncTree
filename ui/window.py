@@ -681,10 +681,11 @@ class MainWindow(QMainWindow):
                         from PySide6.QtCore import QThread, Signal
                         class CloneThread(QThread):
                             res_ready = Signal(object)
-                            def __init__(self, c_url, c_cwd, parent=None):
+                            def __init__(self, c_url, c_cwd, existing_subdirs=None, parent=None):
                                 super().__init__(parent)
                                 self.url = c_url
                                 self.cwd = c_cwd
+                                self.existing_subdirs = existing_subdirs or set()
                                 self.proc = None
 
                             def run(self):
@@ -719,6 +720,16 @@ class MainWindow(QMainWindow):
                                             self.proc.kill()
                                         except Exception:
                                             pass
+                                if os.path.isdir(self.cwd):
+                                    try:
+                                        import shutil
+                                        current_subdirs = set(
+                                            d for d in os.listdir(self.cwd) if os.path.isdir(os.path.join(self.cwd, d))
+                                        )
+                                        for nd in (current_subdirs - self.existing_subdirs):
+                                            shutil.rmtree(os.path.join(self.cwd, nd), ignore_errors=True)
+                                    except Exception:
+                                        pass
                                 
                         def on_clone_done(res):
                             if res.returncode == 0:
@@ -748,9 +759,19 @@ class MainWindow(QMainWindow):
                                 else:
                                     self.toast.show_message(tr("clone_subfolder_not_found"))
                             else:
+                                if os.path.isdir(path):
+                                    try:
+                                        import shutil
+                                        current_subdirs = set(
+                                            d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))
+                                        )
+                                        for nd in (current_subdirs - existing_subdirs):
+                                            shutil.rmtree(os.path.join(path, nd), ignore_errors=True)
+                                    except Exception:
+                                        pass
                                 show_result_modal(self.overlay, False, f"{tr('clone_failed')}:\n{res.stderr}")
                                 
-                        self._clone_thread = CloneThread(url, path, self)
+                        self._clone_thread = CloneThread(url, path, existing_subdirs, self)
                         self._clone_thread.res_ready.connect(on_clone_done)
                         self._clone_thread.start()
                         
@@ -782,8 +803,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self.poller.stop()
         self.poller.wait()
-        if hasattr(self, 'tree_view') and self.tree_view:
-            self.tree_view.setModel(None)
+        if hasattr(self, 'file_tree') and self.file_tree:
+            self.file_tree.setModel(None)
         if hasattr(self, 'file_model') and self.file_model:
             self.file_model.deleteLater()
         if hasattr(self, '_clone_thread') and self._clone_thread and self._clone_thread.isRunning():

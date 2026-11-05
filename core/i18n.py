@@ -1,4 +1,4 @@
-
+import weakref
 i18n_dict = {
     "zh": {
         "sync_latest": "获取最新代码",
@@ -271,19 +271,35 @@ class _LanguageChangedSignal:
         self._listeners = []
 
     def connect(self, callback):
-        if callback not in self._listeners:
-            self._listeners.append(callback)
+        if hasattr(callback, '__self__') and callback.__self__ is not None:
+            ref = weakref.WeakMethod(callback)
+        else:
+            try:
+                ref = weakref.ref(callback)
+            except TypeError:
+                ref = lambda: callback
+        for existing in self._listeners:
+            if existing() == callback:
+                return
+        self._listeners.append(ref)
 
     def disconnect(self, callback):
-        if callback in self._listeners:
-            self._listeners.remove(callback)
+        self._listeners = [
+            r for r in self._listeners
+            if r() is not None and r() != callback
+        ]
 
     def emit(self, val):
-        for cb in list(self._listeners):
-            try:
-                cb(val)
-            except Exception:
-                pass
+        alive = []
+        for ref in self._listeners:
+            func = ref()
+            if func is not None:
+                alive.append(ref)
+                try:
+                    func(val)
+                except Exception:
+                    pass
+        self._listeners = alive
 
 class LanguageManager:
     def __init__(self):
