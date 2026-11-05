@@ -1,7 +1,9 @@
 import os
 import pytest
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Fallback to offscreen if neither DISPLAY nor QT_QPA_PLATFORM is provided
+if "DISPLAY" not in os.environ and "QT_QPA_PLATFORM" not in os.environ:
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from PySide6.QtWidgets import QApplication
 
