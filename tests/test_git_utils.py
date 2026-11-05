@@ -16,6 +16,7 @@ def temp_repo():
     actions.run_cmd(["config", "user.email", "tester@example.com"])
     yield tmp_dir, poller, actions
     poller.stop()
+    poller.wait(1000)
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
 def test_git_poller_init_attributes():

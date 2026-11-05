@@ -28,8 +28,8 @@ from ui.components.toast import ToastLabel
 from ui.components.modals import ModalOverlay, show_input_modal, show_history_branch_modal, show_diag_modal, show_about_modal, show_search_results_modal, show_result_modal, BaseDialogMsg
 
 class GitFileModel(QFileSystemModel):
-    def __init__(self, main_window):
-        super().__init__()
+    def __init__(self, main_window=None):
+        super().__init__(main_window)
         self.main_window = main_window
 
     def data(self, index, role=Qt.DisplayRole):
@@ -782,6 +782,10 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self.poller.stop()
         self.poller.wait()
+        if hasattr(self, 'tree_view') and self.tree_view:
+            self.tree_view.setModel(None)
+        if hasattr(self, 'file_model') and self.file_model:
+            self.file_model.deleteLater()
         if hasattr(self, '_clone_thread') and self._clone_thread and self._clone_thread.isRunning():
             if hasattr(self._clone_thread, 'cancel'):
                 self._clone_thread.cancel()
