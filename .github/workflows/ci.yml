@@ -75,10 +75,15 @@ jobs:
           pip install pytest pytest-cov
 
       - name: Execute Automated Test Suite (Headless Offscreen)
+        shell: bash
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          python -m pytest tests -v --cov=core --cov=ui --cov-report=xml
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ] && [ "${{ matrix.python-version }}" = "3.11" ]; then
+            python -m pytest tests -v --cov=core --cov=ui --cov-report=xml
+          else
+            python -m pytest tests -v
+          fi
 
       - name: Upload Test Coverage
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
