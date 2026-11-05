@@ -53,7 +53,9 @@ def test_terminal_open_special_characters():
     special_path = r"C:\Code\C & C++\Project | Test"
     panel.line_local.setText(special_path)
     
-    with patch("os.path.exists", return_value=True), patch("subprocess.Popen") as mock_popen:
+    with patch("os.path.exists", return_value=True), \
+         patch("shutil.which", return_value="/usr/bin/xterm"), \
+         patch("subprocess.Popen") as mock_popen:
         panel._open_terminal()
         mock_popen.assert_called_once()
         args, kwargs = mock_popen.call_args
@@ -63,5 +65,12 @@ def test_terminal_open_special_characters():
         if os.name == 'nt':
             assert isinstance(cmd_args, list)
             assert cmd_args == ["cmd.exe"]
+            assert kwargs.get("cwd") == special_path
+            assert kwargs.get("shell") is not True
+        elif sys.platform == 'darwin':
+            assert isinstance(cmd_args, list)
+            assert cmd_args == ["open", "-a", "Terminal", special_path]
+        else:
+            assert isinstance(cmd_args, list)
             assert kwargs.get("cwd") == special_path
             assert kwargs.get("shell") is not True
