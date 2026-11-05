@@ -22,9 +22,8 @@ def test_close_event_unsets_file_tree_model():
         window.close()
         assert window.file_tree.model() is None
     finally:
-        window.deleteLater()
-        if QApplication.instance():
-            QApplication.instance().processEvents()
+        window.poller.stop()
+        window.poller.wait()
 
 
 def test_language_manager_weak_reference_allows_gc():
