@@ -79,11 +79,7 @@ jobs:
         env:
           QT_QPA_PLATFORM: xcb
         run: |
-          if [ "${{ matrix.python-version }}" = "3.11" ]; then
-            xvfb-run -a --server-args="-screen 0 1024x768x24" python -m pytest tests -v --cov=core --cov=ui --cov-report=xml
-          else
-            xvfb-run -a --server-args="-screen 0 1024x768x24" python -m pytest tests -v
-          fi
+          xvfb-run -a --server-args="-screen 0 1024x768x24" python -m pytest tests -v --cov=core --cov=ui --cov-report=xml
 
       - name: Execute Automated Test Suite (Windows & macOS)
         if: runner.os != 'Linux'
