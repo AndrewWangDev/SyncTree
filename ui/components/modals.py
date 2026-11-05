@@ -3,7 +3,7 @@ from PySide6.QtGui import QPainter, QColor, QBrush, QPaintEvent, QPen
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, Property, Signal
 from ui.theme import COLORS
 from ui.components.buttons import MaterialButton
-from core.i18n import tr
+from core.i18n import tr, lang_manager
 
 class ModalOverlay(QWidget):
     def __init__(self, parent=None):

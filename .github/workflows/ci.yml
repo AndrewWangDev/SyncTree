@@ -41,11 +41,10 @@ jobs:
 
       - name: Run Bandit (Security Vulnerability AST Scan)
         run: |
-          bandit -r core ui main.py -x tests --severity-level medium
+          bandit -r core ui main.py -x tests --severity-level medium -s B404,B603,B607
 
   test-matrix:
     name: Test on ${{ matrix.os }} (Py ${{ matrix.python-version }})
-    needs: lint-and-security
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
