@@ -1,0 +1,33 @@
+name: 💡 Feature Request
+description: Propose a new feature, UX improvement, or enhancement for SyncTree.
+title: "[Feat]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: "Have an idea to make SyncTree even better? We would love to hear your proposal!"
+  - type: textarea
+    id: problem-statement
+    attributes:
+      label: Problem Context
+      description: Is your feature request related to a specific workflow problem, limitation, or pain point?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the solution or user experience you would like to see implemented.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternative Solutions Considered
+      description: Any alternative designs, tools, or workarounds you have considered?
+  - type: checkboxes
+    id: willingness
+    attributes:
+      label: Contribution
+      options:
+        - label: I am interested in submitting a Pull Request to implement this feature!
