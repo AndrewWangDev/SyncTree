@@ -805,8 +805,6 @@ class MainWindow(QMainWindow):
         self.poller.wait()
         if hasattr(self, 'file_tree') and self.file_tree:
             self.file_tree.setModel(None)
-        if hasattr(self, 'file_model') and self.file_model:
-            self.file_model.deleteLater()
         if hasattr(self, '_clone_thread') and self._clone_thread and self._clone_thread.isRunning():
             if hasattr(self._clone_thread, 'cancel'):
                 self._clone_thread.cancel()
