@@ -6,7 +6,8 @@ import pytest
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QLabel
 app = QApplication.instance() or QApplication([])
 
 from core.state import GitState
@@ -139,3 +140,49 @@ def test_file_tree_folder_status_bubbling():
         window.close()
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_window_title_and_beta_badge_removed():
+    """验证 Beta 标识已移除且窗口标题为 SyncTree"""
+    window = MainWindow()
+    window.poller.stop()
+    window.poller.wait()
+    try:
+        assert window.windowTitle() == "SyncTree"
+        # 验证标题栏区域内不存在包含 "Beta" 的 QLabel
+        labels = window.findChildren(QLabel)
+        for lbl in labels:
+            assert lbl.text().strip() != "Beta", "Beta label badge should be removed from official release"
+    finally:
+        window.close()
+
+
+def test_focus_cleared_on_outside_click():
+    """验证全局 EventFilter 在点击输入框外部时自动清除 QLineEdit 焦点"""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QWidget
+    from unittest.mock import patch
+    
+    window = MainWindow()
+    window.poller.stop()
+    window.poller.wait()
+    try:
+        line_edit = window.panel.line_remote
+        dummy_widget = QWidget(window)
+        mouse_press = QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            QPointF(10, 10),
+            QPointF(10, 10),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier
+        )
+        
+        with patch.object(QApplication, "focusWidget", return_value=line_edit), \
+             patch.object(line_edit, "clearFocus") as mock_clear:
+            window.eventFilter(dummy_widget, mouse_press)
+            assert mock_clear.called, "clearFocus should be called on the focused QLineEdit"
+    finally:
+        window.close()
+

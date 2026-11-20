@@ -44,21 +44,25 @@ class PanelView(QWidget):
         
         # Local Path
         self.lbl_local = QLabel(tr("local_repo"))
+        self.lbl_local.setMinimumWidth(90)
         self.lbl_local.setStyleSheet(f"color: {COLORS['text_disabled']};")
         self.line_local = QLineEdit(self.config.get("local_path", ""))
+        self.line_local.setFixedHeight(40)
         self.line_local.setReadOnly(True)
         self.btn_select = MaterialButton(tr("select_folder"))
         self.btn_select.clicked.connect(self._select_folder)
         
-        grid.addWidget(self.lbl_local, 0, 0)
-        grid.addWidget(self.line_local, 0, 1)
-        grid.addWidget(self.btn_select, 0, 2)
+        grid.addWidget(self.lbl_local, 0, 0, Qt.AlignVCenter)
+        grid.addWidget(self.line_local, 0, 1, Qt.AlignVCenter)
+        grid.addWidget(self.btn_select, 0, 2, Qt.AlignVCenter)
         
         # Remote URL
         self.lbl_remote = QLabel(tr("remote_repo"))
+        self.lbl_remote.setMinimumWidth(90)
         self.lbl_remote.setStyleSheet(f"color: {COLORS['text_disabled']};")
         self._raw_remote_url = self.config.get("remote_url", "")
         self.line_remote = QLineEdit(mask_remote_url(self._raw_remote_url))
+        self.line_remote.setFixedHeight(40)
         self.line_remote.editingFinished.connect(self._save_remote_url)
         
         action_layout_remote = QHBoxLayout()
@@ -72,14 +76,16 @@ class PanelView(QWidget):
         action_layout_remote.addWidget(self.btn_save_remote)
         action_layout_remote.addWidget(self.btn_clear_remote)
         
-        grid.addWidget(self.lbl_remote, 1, 0)
-        grid.addWidget(self.line_remote, 1, 1)
-        grid.addLayout(action_layout_remote, 1, 2)
+        grid.addWidget(self.lbl_remote, 1, 0, Qt.AlignVCenter)
+        grid.addWidget(self.line_remote, 1, 1, Qt.AlignVCenter)
+        grid.addLayout(action_layout_remote, 1, 2, Qt.AlignVCenter)
         
         # Project URL & Preview actions
         self.lbl_project = QLabel(tr("project_url"))
+        self.lbl_project.setMinimumWidth(90)
         self.lbl_project.setStyleSheet(f"color: {COLORS['text_disabled']};")
         self.line_project = QLineEdit(self.config.get("project_url", ""))
+        self.line_project.setFixedHeight(40)
         self.line_project.editingFinished.connect(self._save_project_url)
         self.line_project.textChanged.connect(self._update_preview_state)
         
@@ -96,9 +102,13 @@ class PanelView(QWidget):
         action_layout.addWidget(self.btn_terminal)
         action_layout.addWidget(self.btn_cleanup)
         
-        grid.addWidget(self.lbl_project, 2, 0)
-        grid.addWidget(self.line_project, 2, 1)
-        grid.addLayout(action_layout, 2, 2)
+        grid.addWidget(self.lbl_project, 2, 0, Qt.AlignVCenter)
+        grid.addWidget(self.line_project, 2, 1, Qt.AlignVCenter)
+        grid.addLayout(action_layout, 2, 2, Qt.AlignVCenter)
+
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(2, 0)
         
         self.layout.addWidget(config_widget)
 
@@ -296,3 +306,9 @@ class PanelView(QWidget):
 
     def get_repo_path(self):
         return self.line_local.text()
+
+    def mousePressEvent(self, event):
+        focused = self.focusWidget()
+        if isinstance(focused, QLineEdit):
+            focused.clearFocus()
+        super().mousePressEvent(event)

@@ -122,11 +122,12 @@ def show_history_branch_modal(overlay, title, history_choices, callback):
     dialog = BaseDialogMsg(title, overlay)
     
     combo = QComboBox()
-    combo.setStyleSheet(f"background: {COLORS['surface_variant']}; color: {COLORS['text']}; padding: 8px; border-radius: 8px;")
+    combo.setFixedHeight(40)
     combo.addItems(history_choices)
     dialog.vbox.addWidget(combo)
     
     line_edit = QLineEdit()
+    line_edit.setFixedHeight(40)
     line_edit.setPlaceholderText(tr("enter_task_name"))
     dialog.vbox.addWidget(line_edit)
     
@@ -146,7 +147,7 @@ def show_branch_selection_modal(overlay, title, branches, callback):
     dialog = BaseDialogMsg(title, overlay)
     
     combo = QComboBox()
-    combo.setStyleSheet(f"background: {COLORS['surface_variant']}; color: {COLORS['text']}; padding: 8px; border-radius: 8px;")
+    combo.setFixedHeight(40)
     combo.addItems(branches)
     dialog.vbox.addWidget(combo)
     

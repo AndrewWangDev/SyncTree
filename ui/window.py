@@ -1,4 +1,6 @@
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSplitter, QTreeView, QFileSystemModel, QMenu, QLineEdit
+from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+                                 QPushButton, QSplitter, QTreeView, QFileSystemModel, QMenu, 
+                                 QLineEdit, QApplication)
 from PySide6.QtGui import QIcon, QCursor, QPainter, QPixmap, QColor, QPen, QDesktopServices
 from PySide6.QtCore import Qt, QTimer, QEvent, QUrl
 import os
@@ -137,7 +139,7 @@ class GitFileModel(QFileSystemModel):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("SyncTree (Beta)")
+        self.setWindowTitle("SyncTree")
         self.setWindowIcon(QIcon(get_resource_path("logo.png")))
         self.resize(800, 820)
         self.setStyleSheet(QSS)
@@ -148,12 +150,30 @@ class MainWindow(QMainWindow):
         
         self._setup_ui()
         self._bind_signals()
+
+        app = QApplication.instance()
+        if app:
+            app.installEventFilter(self)
         
         initial_path = self.panel.get_repo_path()
         if initial_path:
             self.change_repo(initial_path)
             if self.panel.config.get("remote_url"):
                 self.actions.set_remote(self.panel.config["remote_url"])
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.MouseButtonPress:
+            focused = QApplication.focusWidget()
+            if isinstance(focused, QLineEdit):
+                if obj is not focused and not focused.isAncestorOf(obj):
+                    focused.clearFocus()
+        return super().eventFilter(obj, event)
+
+    def mousePressEvent(self, event):
+        focused = QApplication.focusWidget()
+        if isinstance(focused, QLineEdit):
+            focused.clearFocus()
+        super().mousePressEvent(event)
 
     def _setup_ui(self):
         central = QWidget()
@@ -170,13 +190,7 @@ class MainWindow(QMainWindow):
         title_layout.setSpacing(8)
         title_lbl = QLabel("SyncTree")
         title_lbl.setStyleSheet("font-size: 24px; font-weight: bold;")
-        
-        beta_lbl = QLabel("Beta")
-        beta_lbl.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {COLORS['on_primary']}; background-color: {COLORS['primary']}; border-radius: 4px; padding: 2px 6px;")
-        beta_lbl.setFixedHeight(20)
-        
         title_layout.addWidget(title_lbl)
-        title_layout.addWidget(beta_lbl, 0, Qt.AlignVCenter)
         
         self.btn_lang = QPushButton("中 / EN")
         self.btn_lang.setFixedSize(80, 40)
@@ -877,6 +891,12 @@ class MainWindow(QMainWindow):
         self.poller.start()
 
     def closeEvent(self, event):
+        app = QApplication.instance()
+        if app:
+            try:
+                app.removeEventFilter(self)
+            except Exception:
+                pass
         self.poller.stop()
         self.poller.wait()
         if hasattr(self, 'file_tree') and self.file_tree:

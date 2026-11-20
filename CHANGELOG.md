@@ -37,12 +37,18 @@ This milestone marks a major transformation of SyncTree into a production-grade,
 - **Cross-Platform Case Normalization**: Implemented `normalize_repo_path` to handle Windows/macOS case-insensitivity while strictly preserving Linux casing.
 - **Worktree & Submodule Support**: Resolved the physical Git directory via `git rev-parse --git-dir` for multi-worktree repositories.
 
+#### 🎨 UI & UX Polish (界面体验与布局修复)
+- **Input Field Layout & Distortion Fix**: Standardized `QLineEdit` heights (`setFixedHeight(40)`), vertical centering, and column stretch weights in grid layouts, eliminating text clipping and vertical distortion across varying window geometries.
+- **Outside-Click Focus Restoration**: Installed an application-wide event filter capturing mouse clicks on non-input areas, immediately clearing `QLineEdit` focus and restoring border styling from active blue highlight to default neutral gray.
+- **ComboBox Dropdown Arrow Alignment**: Defined explicit `QComboBox::drop-down` subcontrol sizing (`width: 36px`) and `QComboBox::down-arrow` geometric margins, resolving arrow icon cramping against the right border in modal selection dialogs.
+- **Official Release Branding**: Removed `(Beta)` title suffix and top-bar `Beta` pill badge to reflect the official `v2.0.0` general availability release.
+
 #### 🏛️ Governance & CI/CD (开源治理与工程规范)
 - **GPL-2.0 License**: Formally adopted the GNU General Public License v2.0.
 - **Community Standards**: Completed `.github/` suite including `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `PULL_REQUEST_TEMPLATE.md`, and structured YAML issue templates.
 - **Cross-Platform CI Matrix**: Built full GitHub Actions automated test matrix across Ubuntu (with Xvfb), Windows, and macOS on Python 3.10, 3.11, and 3.12.
 - **CodeQL Advanced Security Analysis**: Integrated automated AST security scanning and static analysis.
-- **Test Suite Expansion**: Comprehensive test suite expanded to 43 automated unit and integration tests with 100% passing rate.
+- **Test Suite Expansion**: Comprehensive test suite expanded to 45 automated unit and integration tests with 100% passing rate.
 - **Git History Purification**: Purged all historical `.pyc`, `__pycache__`, and temporary binary assets using `git-filter-repo`.
 
 ---
