@@ -1,6 +1,6 @@
 <div align="center">
   <img src="logo.png" width="128" height="128" alt="SyncTree Logo">
-  <h1>SyncTree (Beta)</h1>
+  <h1>SyncTree for Git</h1>
   
   <p>
     <a href="https://github.com/AndrewWangDev/SyncTree/actions"><img src="https://img.shields.io/badge/Tests-Passing-success?style=flat-square&logo=github-actions" alt="Tests"></a>
