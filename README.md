@@ -91,6 +91,12 @@ python build.py
 
 ---
 
+## 📝 Changelog
+
+Detailed release notes and change logs for each version are available in **[CHANGELOG.md](CHANGELOG.md)**.
+
+---
+
 ## 📄 License
 
 This project is licensed under the **[GNU General Public License v2.0 (GPL-2.0)](LICENSE)**.  
