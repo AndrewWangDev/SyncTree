@@ -5,7 +5,7 @@ import shutil
 import pytest
 from unittest.mock import patch, MagicMock
 
-from core.git_actions import GitActions
+from core.git_actions import GitActions, GitTaskThread
 from core.git_utils import GitPoller, normalize_repo_path
 from core.state import GitState
 from core.network_diag import EnvDiagThread
@@ -14,7 +14,7 @@ from ui.window import MainWindow
 
 def test_blocked_extensions_expansion():
     """【SEC-01 验证】扩充后的危险扩展名黑名单必须包含 .hta, .reg, .msi, .lnk, .cpl 等"""
-    dangerous_exts = ['.hta', '.reg', '.msi', '.msp', '.lnk', '.url', '.cpl', '.jar', '.vbe', '.wsf']
+    dangerous_exts = ['.hta', '.reg', '.msi', '.msp', '.lnk', '.url', '.cpl', '.jar', '.vbe', '.wsf', '.scf', '.settingcontent-ms', '.desktop']
     for ext in dangerous_exts:
         assert ext in MainWindow.BLOCKED_EXTS, f"Extension {ext} must be blocked!"
 
@@ -170,3 +170,92 @@ def test_branch_history_validation():
             assert ".." in msg
     finally:
         window.close()
+
+def test_remote_url_masked_edit_preserves_token():
+    """【NEW-01 验证】用户保留掩码星号修改仓库名或域名时，原 Token 必须被正确提取并合并保存"""
+    panel = PanelView()
+    # 模拟预存含 Token 的原地址
+    panel._raw_remote_url = "https://ghp_secretToken999@github.com/AndrewWangDev/repo-A.git"
+    panel.config["remote_url"] = panel._raw_remote_url
+    panel.line_remote.setText("https://***@github.com/AndrewWangDev/repo-B.git")
+    
+    with patch.object(panel, "action_requested") as mock_signal:
+        panel._save_remote_url()
+        # 验证新 URL 成功将 repo-A 更新为 repo-B，同时保留原 Token
+        expected_url = "https://ghp_secretToken999@github.com/AndrewWangDev/repo-B.git"
+        assert panel.config["remote_url"] == expected_url
+        assert panel._raw_remote_url == expected_url
+        # 验证输入框再次脱敏展示
+        assert panel.line_remote.text() == "https://***@github.com/AndrewWangDev/repo-B.git"
+        mock_signal.emit.assert_called_with("set_remote", {"url": expected_url})
+
+def test_git_task_thread_cancel_and_process_termination():
+    """【NEW-02 验证】GitTaskThread.cancel() 能正常终止子进程且不向监听者发射完成信号"""
+    poller = GitPoller()
+    actions = GitActions(poller)
+    
+    thread = GitTaskThread(actions.sync_latest, parent=None)
+    mock_listener = MagicMock()
+    thread.task_done.connect(mock_listener)
+    
+    with patch.object(actions, "cancel_current_process") as mock_cancel:
+        thread.cancel()
+        assert thread._is_cancelled is True
+        mock_cancel.assert_called_once()
+        
+        # 运行 run，验证因 cancelled 直接返回，不发射 task_done
+        with patch.object(actions, "sync_latest", return_value=("ok", None)):
+            thread.run()
+            mock_listener.assert_not_called()
+
+def test_change_repo_guarded_during_async_task():
+    """【NEW-03 验证】当存在正在运行的 sync 或 push 异步线程时，切换仓库被阻止"""
+    window = MainWindow()
+    try:
+        window.poller.stop()
+        window.poller.wait()
+        
+        fake_thread = MagicMock()
+        fake_thread.isRunning.return_value = True
+        window._sync_thread = fake_thread
+        
+        old_path = window.poller.repo_path
+        with patch.object(window.toast, "show_message") as mock_toast:
+            window.change_repo(os.path.abspath("."))
+            mock_toast.assert_called_once()
+            # 仓库路径未被改变
+            assert window.poller.repo_path == old_path
+    finally:
+        window._sync_thread = None
+        window.close()
+
+def test_status_porcelain_rename_with_arrow_in_destination():
+    """【NEW-04 验证】新文件名本身含有箭头的重命名行必须完整保留目标文件名"""
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        poller = GitPoller(tmp_dir)
+        status_lines = "\n".join([
+            "R  old.txt -> step1 -> step2.txt",
+            'R  "docs/old a -> b.txt" -> "docs/step1 -> step2.txt"'
+        ])
+        with patch.object(poller, "_run_git") as mock_git:
+            def side_effect(cmd, timeout=15):
+                if "--is-inside-work-tree" in cmd:
+                    return "true"
+                if "status" in cmd:
+                    return status_lines
+                if "rev-parse" in cmd:
+                    return "hash"
+                if "branch" in cmd:
+                    return "main"
+                return ""
+            mock_git.side_effect = side_effect
+            state = poller._poll_git()
+
+            # 新文件必须完整保留包含箭头的全名
+            assert "step1 -> step2.txt" in state.fileStatuses
+            assert state.fileStatuses["step1 -> step2.txt"] == "staged"
+            assert "docs/step1 -> step2.txt" in state.fileStatuses
+            assert state.fileStatuses["docs/step1 -> step2.txt"] == "staged"
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)

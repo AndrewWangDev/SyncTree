@@ -197,8 +197,16 @@ class GitPoller(QThread):
                     raw_path = line[3:].strip()
                     # 仅在明确为重命名或拷贝状态时提取新文件路径，避免普通带箭头文件名被截断
                     if code[0] in ('R', 'C') and " -> " in raw_path:
-                        parts = raw_path.split(" -> ")
-                        rel_path = parts[-1].strip().strip('"')
+                        if raw_path.startswith('"'):
+                            end_quote = raw_path.find('"', 1)
+                            if end_quote != -1 and raw_path[end_quote:].startswith('" -> '):
+                                rel_path = raw_path[end_quote + 5:].strip().strip('"')
+                            else:
+                                parts = raw_path.split(" -> ", 1)
+                                rel_path = parts[1].strip().strip('"') if len(parts) > 1 else raw_path
+                        else:
+                            parts = raw_path.split(" -> ", 1)
+                            rel_path = parts[1].strip().strip('"') if len(parts) > 1 else raw_path
                     else:
                         rel_path = raw_path.strip().strip('"')
                     

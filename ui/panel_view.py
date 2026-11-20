@@ -196,13 +196,25 @@ class PanelView(QWidget):
 
     def _save_remote_url(self):
         text = self.line_remote.text().strip()
-        if "***@" not in text:
-            self._raw_remote_url = text
-        self.config["remote_url"] = getattr(self, "_raw_remote_url", text)
+        old_url = getattr(self, "_raw_remote_url", "") or self.config.get("remote_url", "")
+        if not text:
+            new_url = ""
+        elif "***@" in text and old_url:
+            m = re.search(r'https?://([^@/]+)@', old_url)
+            if m:
+                creds = m.group(1)
+                new_url = text.replace("***@", f"{creds}@", 1)
+            else:
+                new_url = text
+        else:
+            new_url = text
+
+        self._raw_remote_url = new_url
+        self.config["remote_url"] = new_url
         save_config(self.config)
-        self.line_remote.setText(mask_remote_url(self.config["remote_url"]))
-        if self.config["remote_url"]:
-            self.action_requested.emit("set_remote", {"url": self.config["remote_url"]})
+        self.line_remote.setText(mask_remote_url(new_url))
+        if new_url:
+            self.action_requested.emit("set_remote", {"url": new_url})
             
     def _save_project_url(self):
         url = self.line_project.text().strip()

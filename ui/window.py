@@ -401,8 +401,8 @@ class MainWindow(QMainWindow):
         '.bat', '.cmd', '.ps1', '.psm1', '.vbs', '.vbe', '.jse', '.wsf', '.wsh', '.hta',
         # 安装包与补丁
         '.msi', '.msp',
-        # 快捷方式与互联网快捷方式
-        '.lnk', '.url',
+        # 快捷方式与系统配置控制
+        '.lnk', '.url', '.scf', '.settingcontent-ms', '.desktop',
         # 注册表与可执行归档
         '.reg', '.jar'
     }
@@ -564,13 +564,15 @@ class MainWindow(QMainWindow):
         elif action == "sync":
             self.toast.show_message(tr("syncing"))
             self.panel.btn_sync.setEnabled(False)
+            self.panel.btn_select.setEnabled(False)
             def on_sync_done(success, out, err):
                 self.panel.btn_sync.setEnabled(True)
+                self.panel.btn_select.setEnabled(True)
                 if success:
                     show_result_modal(self.overlay, True, tr("sync_success"))
                 else:
                     self._handle_sync_error(err)
-            self._sync_thread = GitTaskThread(self.actions.sync_latest, parent=self)
+            self._sync_thread = GitTaskThread(self.actions.sync_latest, None, self.poller.repo_path, parent=self)
             self._sync_thread.task_done.connect(on_sync_done)
             self._sync_thread.start()
         elif action == "abort_merge":
@@ -659,13 +661,15 @@ class MainWindow(QMainWindow):
                 branch = self.current_state.currentBranch
                 self.toast.show_message(tr("pushing"))
                 self.panel.btn_push.setEnabled(False)
+                self.panel.btn_select.setEnabled(False)
                 def on_push_done(success, out, err):
                     self.panel.btn_push.setEnabled(True)
+                    self.panel.btn_select.setEnabled(True)
                     if success:
                         show_result_modal(self.overlay, True, tr("push_success"))
                     else:
                         self._handle_push_error(err)
-                self._push_thread = GitTaskThread(self.actions.push, branch, parent=self)
+                self._push_thread = GitTaskThread(self.actions.push, branch, self.poller.repo_path, parent=self)
                 self._push_thread.task_done.connect(on_push_done)
                 self._push_thread.start()
 
@@ -725,6 +729,10 @@ class MainWindow(QMainWindow):
         self.change_repo(new_dir)
 
     def change_repo(self, path):
+        if (hasattr(self, '_sync_thread') and self._sync_thread and self._sync_thread.isRunning()) or \
+           (hasattr(self, '_push_thread') and self._push_thread and self._push_thread.isRunning()):
+            self.toast.show_message("Cannot switch repository while sync or push is in progress.")
+            return
         path = os.path.realpath(path).replace('\\', '/') if path else path
         if path and os.path.exists(path):
             if not os.path.exists(os.path.join(path, ".git")):
@@ -874,11 +882,19 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'file_tree') and self.file_tree:
             self.file_tree.setModel(None)
         if hasattr(self, '_sync_thread') and self._sync_thread and self._sync_thread.isRunning():
-            self._sync_thread.quit()
-            self._sync_thread.wait(1000)
+            try:
+                self._sync_thread.task_done.disconnect()
+            except Exception:
+                pass
+            self._sync_thread.cancel()
+            self._sync_thread.wait(500)
         if hasattr(self, '_push_thread') and self._push_thread and self._push_thread.isRunning():
-            self._push_thread.quit()
-            self._push_thread.wait(1000)
+            try:
+                self._push_thread.task_done.disconnect()
+            except Exception:
+                pass
+            self._push_thread.cancel()
+            self._push_thread.wait(500)
         if hasattr(self, '_clone_thread') and self._clone_thread and self._clone_thread.isRunning():
             if hasattr(self._clone_thread, 'cancel'):
                 self._clone_thread.cancel()

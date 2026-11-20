@@ -9,10 +9,19 @@ from core.git_utils import GitPoller, GitRepoLock
 class GitActions:
     def __init__(self, poller: GitPoller):
         self.poller = poller
+        self._current_process = None
 
-    def run_cmd(self, args, get_stderr=False, timeout=60):
-        repo_path = self.poller.repo_path
-        if not repo_path or not os.path.exists(repo_path):
+    def cancel_current_process(self):
+        proc = self._current_process
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+
+    def run_cmd(self, args, get_stderr=False, timeout=60, repo_path=None):
+        target_repo = repo_path or self.poller.repo_path
+        if not target_repo or not os.path.exists(target_repo):
             return None, "No repo"
 
         startupinfo = None
@@ -28,28 +37,41 @@ class GitActions:
 
         # 获取全局仓库锁，排他执行前台命令
         GitRepoLock.lock()
+        proc = None
         try:
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 ["git", "--no-pager"] + args,
-                cwd=repo_path,
+                cwd=target_repo,
                 stdin=subprocess.DEVNULL,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding='utf-8',
                 errors='replace',
                 env=env,
-                timeout=timeout,
                 startupinfo=startupinfo
             )
+            self._current_process = proc
+            try:
+                stdout, stderr = proc.communicate(timeout=timeout)
+            finally:
+                self._current_process = None
+
             self.poller.trigger_update()
-            if result.returncode != 0:
-                err_msg = result.stderr.strip() if result.stderr.strip() else result.stdout.strip()
+            if proc.returncode != 0:
+                err_msg = stderr.strip() if stderr.strip() else stdout.strip()
                 return None, err_msg
                 
             if get_stderr:
-                return result.stdout.strip(), result.stderr.strip()
-            return result.stdout.strip(), None
+                return stdout.strip(), stderr.strip()
+            return stdout.strip(), None
         except subprocess.TimeoutExpired:
+            if proc:
+                try:
+                    proc.kill()
+                    proc.communicate()
+                except Exception:
+                    pass
             return None, f"Command timed out after {timeout} seconds."
         except Exception as e:
             return None, str(e)
@@ -80,19 +102,20 @@ class GitActions:
         else:
             return self.run_cmd(["remote", "add", remote_name, url])
 
-    def sync_latest(self, branch=None):
+    def sync_latest(self, branch=None, repo_path=None):
+        target_repo = repo_path or self.poller.repo_path
         if not branch:
-            upstream, err = self.run_cmd(["rev-parse", "--abbrev-ref", "@{upstream}"])
+            upstream, err = self.run_cmd(["rev-parse", "--abbrev-ref", "@{upstream}"], repo_path=target_repo)
             if upstream and not err:
                 parts = upstream.split("/", 1)
                 if len(parts) == 2:
-                    return self.run_cmd(["pull", parts[0], parts[1]])
-            current, _ = self.run_cmd(["branch", "--show-current"])
+                    return self.run_cmd(["pull", parts[0], parts[1]], repo_path=target_repo)
+            current, _ = self.run_cmd(["branch", "--show-current"], repo_path=target_repo)
             branch = current if current else "main"
             
         remotes = self.get_remotes()
         remote_name = "origin" if "origin" in remotes else (remotes[0] if remotes else "origin")
-        return self.run_cmd(["pull", remote_name, branch])
+        return self.run_cmd(["pull", remote_name, branch], repo_path=target_repo)
 
     def create_branch(self, name, commit_hash=None):
         if commit_hash:
@@ -132,10 +155,11 @@ class GitActions:
         """中止当前的冲突合并状态并安全复原工作区"""
         return self.run_cmd(["merge", "--abort"])
 
-    def push(self, branch):
+    def push(self, branch, repo_path=None):
+        target_repo = repo_path or self.poller.repo_path
         remotes = self.get_remotes()
         remote_name = "origin" if "origin" in remotes else (remotes[0] if remotes else "origin")
-        out, err = self.run_cmd(["push", "-u", remote_name, branch], get_stderr=True)
+        out, err = self.run_cmd(["push", "-u", remote_name, branch], get_stderr=True, repo_path=target_repo)
         if out is None:
             return None, err
         output = (out or "") + "\n" + (err or "")
@@ -147,7 +171,7 @@ class GitActions:
             parsed = urlparse(url)
             allowed_hosts = {"github.com", "gitlab.com", "gitee.com"}
             try:
-                remote_out, _ = self.run_cmd(["remote", "get-url", remote_name])
+                remote_out, _ = self.run_cmd(["remote", "get-url", remote_name], repo_path=target_repo)
                 if remote_out:
                     r_host = urlparse(remote_out.strip()).hostname
                     if r_host:
@@ -195,18 +219,31 @@ class CleanupThread(QThread):
 class GitTaskThread(QThread):
     task_done = Signal(bool, str, str)  # is_success, stdout, stderr
 
-    def __init__(self, task_func, *args, parent=None):
+    def __init__(self, task_func, *args, actions=None, parent=None):
         super().__init__(parent)
         self.task_func = task_func
         self.args = args
+        if actions is None and hasattr(task_func, "__self__") and isinstance(task_func.__self__, GitActions):
+            self.actions = task_func.__self__
+        else:
+            self.actions = actions
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
+        if self.actions:
+            self.actions.cancel_current_process()
 
     def run(self):
         try:
             res = self.task_func(*self.args)
+            if self._is_cancelled:
+                return
             if isinstance(res, tuple) and len(res) >= 2:
                 out, err = res[0], res[1]
                 self.task_done.emit(err is None, out or "", err or "")
             else:
                 self.task_done.emit(True, str(res or ""), "")
         except Exception as e:
-            self.task_done.emit(False, "", str(e))
+            if not self._is_cancelled:
+                self.task_done.emit(False, "", str(e))
