@@ -1,6 +1,10 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox, QScrollArea
-from PySide6.QtGui import QPainter, QColor, QBrush, QPaintEvent, QPen
-from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, Property, Signal
+import os
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
+                             QComboBox, QScrollArea, QListWidget, QListWidgetItem, 
+                             QStyledItemDelegate, QStyleOptionViewItem, QAbstractItemView,
+                             QStyle)
+from PySide6.QtGui import QPainter, QColor, QBrush, QPaintEvent, QPen, QFont
+from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, Property, Signal, QRect, QSize
 from ui.theme import COLORS
 from ui.components.buttons import MaterialButton
 from core.i18n import tr, lang_manager
@@ -517,6 +521,62 @@ def show_about_modal(overlay):
     overlay.set_content(content)
     overlay.show_animated()
 
+class SearchResultDelegate(QStyledItemDelegate):
+    def sizeHint(self, option, index):
+        if not index.data(Qt.UserRole):
+            return QSize(option.rect.width(), 44)
+        return QSize(option.rect.width(), 52)
+
+    def paint(self, painter, option, index):
+        full_path = index.data(Qt.UserRole)
+        if not full_path:
+            super().paint(painter, option, index)
+            return
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        rect = option.rect.adjusted(2, 2, -2, -2)
+        is_selected = bool(option.state & QStyle.State_Selected)
+        is_hover = bool(option.state & QStyle.State_MouseOver)
+        
+        # 1. Background rendering with proper dark-theme contrast
+        if is_selected:
+            painter.setBrush(QColor(168, 199, 250, 48))
+            painter.setPen(QPen(QColor(168, 199, 250, 180), 1.5))
+            painter.drawRoundedRect(rect, 8, 8)
+        elif is_hover:
+            painter.setBrush(QColor(255, 255, 255, 18))
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(rect, 8, 8)
+        else:
+            painter.setBrush(QColor(COLORS['surface_variant']))
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(rect, 8, 8)
+            
+        filename = os.path.basename(full_path)
+        dirname = os.path.dirname(full_path)
+        content_left = rect.left() + 14
+        max_content_w = rect.width() - 28
+        
+        # 2. Filename (Top line, prominent, crisp white on selected)
+        painter.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        painter.setPen(QColor("#FFFFFF") if is_selected else QColor(COLORS['text']))
+        name_rect = QRect(content_left, rect.top() + 6, max_content_w, 20)
+        elided_name = painter.fontMetrics().elidedText(filename, Qt.TextElideMode.ElideMiddle, max_content_w)
+        painter.drawText(name_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided_name)
+        
+        # 3. Directory path (Bottom line, muted or primary accent when selected)
+        painter.setFont(QFont("Segoe UI", 8))
+        dir_text = dirname if dirname else "./"
+        painter.setPen(QColor(COLORS['primary']) if is_selected else QColor(COLORS['text_disabled']))
+        dir_rect = QRect(content_left, rect.top() + 27, max_content_w, 16)
+        elided_dir = painter.fontMetrics().elidedText(dir_text, Qt.TextElideMode.ElideMiddle, max_content_w)
+        painter.drawText(dir_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided_dir)
+        
+        painter.restore()
+
+
 class SearchResultsModalContent(QWidget):
     def __init__(self, overlay, query, results, repo_path, open_callback):
         super().__init__()
@@ -524,45 +584,76 @@ class SearchResultsModalContent(QWidget):
         self.setAttribute(Qt.WA_StyledBackground)
         self.setObjectName("SearchContainer")
         self.setStyleSheet(f"#SearchContainer {{ background-color: {COLORS['surface']}; border-radius: 16px; border: 1px solid {COLORS['border']}; }}")
-        self.setFixedWidth(460)
+        self.setFixedWidth(560)
         
         layout = QVBoxLayout(self)
         layout.setSizeConstraint(QVBoxLayout.SetFixedSize)
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(12)
         
+        header_l = QHBoxLayout()
         title = QLabel(f"{tr('search_results')} - '{query}'")
         title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLORS['text']};")
-        layout.addWidget(title)
+        header_l.addWidget(title)
         
-        from PySide6.QtWidgets import QListWidget
+        if results:
+            badge = QLabel(f"{len(results)}")
+            badge.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {COLORS['primary']}; background: rgba(168, 199, 250, 0.15); border-radius: 10px; padding: 2px 8px;")
+            header_l.addWidget(badge)
+        header_l.addStretch()
+        layout.addLayout(header_l)
         
         self.list_widget = QListWidget()
+        self.list_widget.setAutoScroll(False)
+        self.list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.list_widget.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.list_widget.setItemDelegate(SearchResultDelegate(self.list_widget))
         self.list_widget.setStyleSheet(f"""
-            QListWidget {{ background: {COLORS['surface_variant']}; border: none; border-radius: 8px; outline: none; padding: 4px; }}
-            QListWidget::item {{ padding: 8px 12px; border-radius: 6px; color: {COLORS['text']}; margin-bottom: 2px; }}
-            QListWidget::item:hover {{ background: {COLORS['surface']}80; }}
-            QListWidget::item:selected {{ background: {COLORS['primary']}40; color: {COLORS['primary']}; }}
-            QScrollBar:vertical {{ background: transparent; width: 6px; margin: 0px; }}
-            QScrollBar::handle:vertical {{ background: {COLORS['border']}; border-radius: 3px; min-height: 20px; }}
+            QListWidget {{ 
+                background: transparent; 
+                border: 1px solid {COLORS['border']}; 
+                border-radius: 8px; 
+                outline: none; 
+                padding: 4px; 
+            }}
+            QScrollBar:vertical {{ 
+                background: transparent; 
+                width: 6px; 
+                margin: 4px 2px 4px 0px; 
+            }}
+            QScrollBar::handle:vertical {{ 
+                background: {COLORS['border']}; 
+                border-radius: 3px; 
+                min-height: 24px; 
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {COLORS['text_disabled']};
+            }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
         """)
         
-        item_height = 34
-        padding = 10
-        list_height = min(260, max(50, len(results) * item_height + padding)) if results else 50
-        self.list_widget.setFixedHeight(list_height)
-        
         if not results:
-            self.list_widget.addItem(tr("no_files_found"))
-            self.list_widget.item(0).setFlags(Qt.NoItemFlags)
-            self.list_widget.item(0).setForeground(QColor(COLORS['text_disabled']))
+            item = QListWidgetItem(tr("no_files_found"))
+            item.setFlags(Qt.NoItemFlags)
+            item.setForeground(QColor(COLORS['text_disabled']))
+            item.setTextAlignment(Qt.AlignCenter)
+            self.list_widget.addItem(item)
+            self.list_widget.setFixedHeight(80)
         else:
             for res in results:
-                self.list_widget.addItem(res)
+                item = QListWidgetItem()
+                item.setData(Qt.UserRole, res)
+                item.setText(res)
+                item.setToolTip(res)
+                self.list_widget.addItem(item)
+                
+            list_height = min(340, max(80, len(results) * 56 + 10))
+            self.list_widget.setFixedHeight(list_height)
+            self.list_widget.setCurrentRow(0)
                 
         self.list_widget.itemDoubleClicked.connect(lambda item: self._on_item_double_clicked(item, open_callback))
+        self.list_widget.itemActivated.connect(lambda item: self._on_item_double_clicked(item, open_callback))
         layout.addWidget(self.list_widget)
         
         hint = QLabel(tr("double_click_hint"))
@@ -579,7 +670,8 @@ class SearchResultsModalContent(QWidget):
 
     def _on_item_double_clicked(self, item, open_callback):
         if item.flags() & Qt.ItemIsEnabled:
-            open_callback(item.text())
+            val = item.data(Qt.UserRole) or item.text()
+            open_callback(val)
             self.overlay.hide_animated()
 
 def show_search_results_modal(overlay, query, results, repo_path, open_callback):

@@ -464,7 +464,7 @@ class MainWindow(QMainWindow):
         menu.setStyleSheet(f"""
             QMenu {{ background-color: {COLORS['surface']}; color: {COLORS['text']}; border: 1px solid {COLORS['border']}; border-radius: 8px; padding: 4px; }}
             QMenu::item {{ padding: 6px 24px; border-radius: 4px; }}
-            QMenu::item:selected {{ background-color: {COLORS['primary']}40; color: {COLORS['primary']}; }}
+            QMenu::item:selected {{ background-color: rgba(168, 199, 250, 0.22); color: #FFFFFF; }}
         """)
         
         rename_act = menu.addAction(tr("rename"))

@@ -42,13 +42,16 @@ This milestone marks a major transformation of SyncTree into a production-grade,
 - **Outside-Click Focus Restoration**: Installed an application-wide event filter capturing mouse clicks on non-input areas, immediately clearing `QLineEdit` focus and restoring border styling from active blue highlight to default neutral gray.
 - **ComboBox Dropdown Arrow Alignment**: Defined explicit `QComboBox::drop-down` subcontrol sizing (`width: 36px`) and `QComboBox::down-arrow` geometric margins, resolving arrow icon cramping against the right border in modal selection dialogs.
 - **Official Release Branding**: Removed `(Beta)` title suffix and top-bar `Beta` pill badge to reflect the official `v2.0.0` general availability release.
+- **Search Results List & Contrast Overhaul**: Fixed unintentional ARGB lime-green background parsing bug in list selection by replacing with high-contrast Material dark styling (`rgba(168, 199, 250, 0.18)` background with crisp white text). Introduced `SearchResultDelegate` rendering filename and directory path on two clean visual tiers with middle eliding.
+- **Eliminated Unexpected Selection Scrolling**: Disabled `autoScroll` and horizontal scrollbar overflow (`ScrollBarAlwaysOff`), preventing viewport jumping when clicking or navigating search result list items.
+- **Context Menu Selection Color Normalization**: Fixed right-click context menu hover/selection color in the file tree from lime-green to consistent translucent primary blue.
 
 #### 🏛️ Governance & CI/CD (开源治理与工程规范)
 - **GPL-2.0 License**: Formally adopted the GNU General Public License v2.0.
 - **Community Standards**: Completed `.github/` suite including `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `PULL_REQUEST_TEMPLATE.md`, and structured YAML issue templates.
 - **Cross-Platform CI Matrix**: Built full GitHub Actions automated test matrix across Ubuntu (with Xvfb), Windows, and macOS on Python 3.10, 3.11, and 3.12.
 - **CodeQL Advanced Security Analysis**: Integrated automated AST security scanning and static analysis.
-- **Test Suite Expansion**: Comprehensive test suite expanded to 45 automated unit and integration tests with 100% passing rate.
+- **Test Suite Expansion**: Comprehensive test suite expanded to 47 automated unit and integration tests with 100% passing rate.
 - **Git History Purification**: Purged all historical `.pyc`, `__pycache__`, and temporary binary assets using `git-filter-repo`.
 
 ---

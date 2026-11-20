@@ -186,3 +186,62 @@ def test_focus_cleared_on_outside_click():
     finally:
         window.close()
 
+
+def test_search_results_modal_styling_and_behavior():
+    """验证搜索结果弹窗列表样式、水平滚动禁用、双击回调与委托渲染"""
+    from ui.components.modals import SearchResultsModalContent, SearchResultDelegate
+    from unittest.mock import MagicMock
+    from PySide6.QtGui import QPixmap, QPainter
+    
+    mock_overlay = MagicMock()
+    mock_callback = MagicMock()
+    results = [
+        "app/src/main/assets/addon.user.js",
+        "app/src/main/java/com/syncbrow/tools/MainActivity.java"
+    ]
+    
+    modal = SearchResultsModalContent(mock_overlay, "main", results, "C:/dummy/repo", mock_callback)
+    
+    # 验证禁用自动滚动与横向滚动条，杜绝意外滚动跳变
+    assert modal.list_widget.hasAutoScroll() is False
+    assert modal.list_widget.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert modal.list_widget.count() == 2
+    
+    # 验证 Item 数据与 Tooltip
+    item0 = modal.list_widget.item(0)
+    assert item0.data(Qt.ItemDataRole.UserRole) == results[0]
+    assert item0.toolTip() == results[0]
+    
+    # 验证委托绘制不抛出异常
+    delegate = modal.list_widget.itemDelegate()
+    assert isinstance(delegate, SearchResultDelegate)
+    pix = QPixmap(500, 100)
+    painter = QPainter(pix)
+    from PySide6.QtWidgets import QStyleOptionViewItem
+    from PySide6.QtCore import QRect
+    opt = QStyleOptionViewItem()
+    opt.rect = QRect(0, 0, 500, 52)
+    idx = modal.list_widget.model().index(0, 0)
+    delegate.paint(painter, opt, idx)
+    painter.end()
+    
+    # 验证激活/双击触发回调
+    modal._on_item_double_clicked(item0, mock_callback)
+    mock_callback.assert_called_once_with(results[0])
+    mock_overlay.hide_animated.assert_called_once()
+
+
+def test_search_results_empty():
+    """验证搜索无结果占位展示与不可选状态"""
+    from ui.components.modals import SearchResultsModalContent
+    from unittest.mock import MagicMock
+    
+    mock_overlay = MagicMock()
+    mock_callback = MagicMock()
+    modal = SearchResultsModalContent(mock_overlay, "nonexistent", [], "C:/dummy/repo", mock_callback)
+    
+    assert modal.list_widget.count() == 1
+    empty_item = modal.list_widget.item(0)
+    assert empty_item.flags() == Qt.ItemFlag.NoItemFlags
+
+
