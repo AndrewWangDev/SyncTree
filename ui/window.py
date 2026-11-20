@@ -17,8 +17,8 @@ if os.name == 'nt':
     except Exception:
         pass
 
-from core.git_utils import GitPoller
-from core.git_actions import GitActions, CleanupThread
+from core.git_utils import GitPoller, normalize_repo_path
+from core.git_actions import GitActions, CleanupThread, GitTaskThread
 from core.i18n import lang_manager, tr
 from ui.theme import QSS, COLORS
 from ui.graph_view import GraphView
@@ -73,8 +73,8 @@ class GitFileModel(QFileSystemModel):
         if not state or not state.isRepo or not self.main_window.poller.repo_path:
             return None
         
-        file_real = os.path.realpath(file_path).replace('\\', '/').lower()
-        repo_real = os.path.realpath(self.main_window.poller.repo_path).replace('\\', '/').lower()
+        file_real = normalize_repo_path(file_path)
+        repo_real = normalize_repo_path(self.main_window.poller.repo_path)
         
         # 1. 直接绝对路径匹配
         if file_real in state.fileStatuses:
@@ -83,7 +83,9 @@ class GitFileModel(QFileSystemModel):
         # 2. 相对路径匹配
         rel = ""
         try:
-            rel = os.path.relpath(file_real, repo_real).replace('\\', '/').lower().strip('/')
+            rel = os.path.relpath(file_real, repo_real).replace('\\', '/').strip('/')
+            if os.name == 'nt' or sys.platform == 'darwin':
+                rel = rel.lower()
             if rel == '.' or rel == '':
                 rel = ""
             if rel and rel in state.fileStatuses:
@@ -113,7 +115,7 @@ class GitFileModel(QFileSystemModel):
                 prefix_abs = file_real.rstrip('/') + '/'
                 prefix_rel = (rel.rstrip('/') + '/') if rel else ""
                 for path_key, status in state.fileStatuses.items():
-                    norm = path_key.replace('\\', '/').lower()
+                    norm = normalize_repo_path(path_key)
                     if norm.startswith(prefix_abs) or (prefix_rel and norm.startswith(prefix_rel)):
                         p = priority.get(status, 0)
                         if p > best_priority:
@@ -125,7 +127,7 @@ class GitFileModel(QFileSystemModel):
         # 5. 父级状态继承（未跟踪或忽略目录向下传播）
         curr = file_real
         while len(curr) > len(repo_real):
-            curr = os.path.dirname(curr).replace('\\', '/').lower()
+            curr = normalize_repo_path(os.path.dirname(curr))
             if curr in state.fileStatuses:
                 p_st = state.fileStatuses[curr]
                 if p_st in ('untracked', 'ignored'):
@@ -392,7 +394,18 @@ class MainWindow(QMainWindow):
         from ui.components.modals import show_branch_selection_modal
         show_branch_selection_modal(self.overlay, tr("switch_branch"), choices, do_switch)
 
-    BLOCKED_EXTS = {'.exe', '.bat', '.cmd', '.ps1', '.vbs', '.vbe', '.jse', '.wsf', '.wsh', '.msc', '.com', '.scr', '.pif'}
+    BLOCKED_EXTS = {
+        # Windows 可执行二进制与控制面板
+        '.exe', '.com', '.scr', '.pif', '.msc', '.cpl',
+        # 脚本宿主与批处理
+        '.bat', '.cmd', '.ps1', '.psm1', '.vbs', '.vbe', '.jse', '.wsf', '.wsh', '.hta',
+        # 安装包与补丁
+        '.msi', '.msp',
+        # 快捷方式与互联网快捷方式
+        '.lnk', '.url',
+        # 注册表与可执行归档
+        '.reg', '.jar'
+    }
 
     def _safe_open_file(self, full_path):
         if not full_path or not os.path.isfile(full_path):
@@ -471,7 +484,7 @@ class MainWindow(QMainWindow):
             try:
                 rel_old = os.path.relpath(old_path, self.poller.repo_path).replace('\\', '/')
                 rel_new = os.path.relpath(new_path, self.poller.repo_path).replace('\\', '/')
-                out, err = self.actions.run_cmd(["mv", rel_old, rel_new])
+                out, err = self.actions.run_cmd(["mv", "--", rel_old, rel_new])
                 if err:
                     os.rename(old_path, new_path)
                 self.poller.trigger_update()
@@ -549,11 +562,35 @@ class MainWindow(QMainWindow):
             if err:
                 show_result_modal(self.overlay, False, f"{tr('config_remote_failed')}:\n\n{err}")
         elif action == "sync":
-            out, err = self.actions.sync_latest()
-            if err:
-                show_result_modal(self.overlay, False, f"{tr('sync_failed')}\n\n{err}", lambda: show_diag_modal(self.overlay))
-            else:
-                show_result_modal(self.overlay, True, tr("sync_success"))
+            self.toast.show_message(tr("syncing"))
+            self.panel.btn_sync.setEnabled(False)
+            def on_sync_done(success, out, err):
+                self.panel.btn_sync.setEnabled(True)
+                if success:
+                    show_result_modal(self.overlay, True, tr("sync_success"))
+                else:
+                    self._handle_sync_error(err)
+            self._sync_thread = GitTaskThread(self.actions.sync_latest, parent=self)
+            self._sync_thread.task_done.connect(on_sync_done)
+            self._sync_thread.start()
+        elif action == "abort_merge":
+            def do_abort():
+                out, err = self.actions.abort_merge()
+                if err:
+                    show_result_modal(self.overlay, False, f"Abort merge failed:\n\n{err}")
+                else:
+                    show_result_modal(self.overlay, True, tr("abort_merge_success"))
+                return False
+            dialog = BaseDialogMsg(tr("abort_merge"), self.overlay)
+            lbl = QLabel(tr("abort_merge_confirm"))
+            lbl.setStyleSheet(f"color: {COLORS['error']}; font-weight: bold;")
+            lbl.setWordWrap(True)
+            dialog.vbox.addWidget(lbl)
+            dialog.add_buttons(on_confirm=do_abort)
+            self.overlay.set_content(dialog)
+            self.overlay.show_animated()
+        elif action == "cleanup":
+            self._handle_cleanup_safe()
         elif action == "terminal_error":
             show_result_modal(self.overlay, False, payload.get("msg", "Terminal launch failed."))
         elif action == "branch":
@@ -575,6 +612,11 @@ class MainWindow(QMainWindow):
                 out, err = self.actions.run_cmd(["log", "--all", "--oneline", "--no-color", "-n", "50"])
                 choices = out.splitlines() if out else []
                 def do_branch_hist(name, hash_val):
+                    name = name.strip()
+                    is_valid, err_msg = self.actions.is_valid_branch_name(name)
+                    if not is_valid:
+                        show_result_modal(self.overlay, False, err_msg)
+                        return False
                     o, e = self.actions.create_branch(name, hash_val)
                     if e:
                         show_result_modal(self.overlay, False, f"{tr('branch_failed')}\n\n{e}")
@@ -613,12 +655,39 @@ class MainWindow(QMainWindow):
             else:
                 show_result_modal(self.overlay, True, tr("undo_commit_success"))
         elif action == "push":
-            if self.current_state:
-                out, err = self.actions.push(self.current_state.currentBranch)
-                if err is not None:
-                    show_result_modal(self.overlay, False, f"{tr('push_failed')}\n\n{err}", lambda: show_diag_modal(self.overlay))
-                else:
-                    show_result_modal(self.overlay, True, tr("push_success"))
+            if self.current_state and self.current_state.currentBranch:
+                branch = self.current_state.currentBranch
+                self.toast.show_message(tr("pushing"))
+                self.panel.btn_push.setEnabled(False)
+                def on_push_done(success, out, err):
+                    self.panel.btn_push.setEnabled(True)
+                    if success:
+                        show_result_modal(self.overlay, True, tr("push_success"))
+                    else:
+                        self._handle_push_error(err)
+                self._push_thread = GitTaskThread(self.actions.push, branch, parent=self)
+                self._push_thread.task_done.connect(on_push_done)
+                self._push_thread.start()
+
+    def _handle_sync_error(self, err):
+        err_lower = (err or "").lower()
+        if any(k in err_lower for k in ["could not resolve host", "failed to connect", "connection timed out", "network is unreachable"]):
+            show_result_modal(self.overlay, False, f"{tr('sync_failed')}\n\n{err}", lambda: show_diag_modal(self.overlay))
+        else:
+            show_result_modal(self.overlay, False, f"{tr('sync_failed')}\n\n{err}")
+
+    def _handle_push_error(self, err):
+        err_lower = (err or "").lower()
+        if "fetch first" in err_lower or "non-fast-forward" in err_lower or "[rejected]" in err_lower:
+            msg = f"{tr('push_failed')}\n\n{tr('remote_has_new_commits')}\n\n{err}"
+            show_result_modal(self.overlay, False, msg)
+        elif "permission denied" in err_lower or "authentication failed" in err_lower or "could not read username" in err_lower:
+            msg = f"{tr('push_failed')}\n\n{tr('auth_failed_guide')}\n\n{err}"
+            show_result_modal(self.overlay, False, msg)
+        elif any(k in err_lower for k in ["could not resolve host", "failed to connect", "connection timed out", "network is unreachable"]):
+            show_result_modal(self.overlay, False, f"{tr('push_failed')}\n\n{err}", lambda: show_diag_modal(self.overlay))
+        else:
+            show_result_modal(self.overlay, False, f"{tr('push_failed')}\n\n{err}")
 
     def _handle_cleanup_safe(self):
         """显式安全清理入口（支持 dry-run 预览与二次确认）"""
@@ -693,7 +762,7 @@ class MainWindow(QMainWindow):
                                 cr = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
                                 try:
                                     self.proc = subprocess.Popen(
-                                        ["git", "clone", self.url],
+                                        ["git", "clone", "--", self.url],
                                         cwd=self.cwd,
                                         stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE,
@@ -790,21 +859,26 @@ class MainWindow(QMainWindow):
             
     def _setup_repo_path(self, path):
         path = os.path.normpath(path)
+        if self.poller.isRunning():
+            self.poller.stop()
+            self.poller.wait()
         self.poller.reset_watcher()
         self.poller.repo_path = path
         self.file_model.setRootPath(path)
         self.file_tree.setRootIndex(self.file_model.index(path))
-        
-        if not self.poller.isRunning():
-            self.poller.start()
-        else:
-            self.poller.trigger_update()
+        self.poller.start()
 
     def closeEvent(self, event):
         self.poller.stop()
         self.poller.wait()
         if hasattr(self, 'file_tree') and self.file_tree:
             self.file_tree.setModel(None)
+        if hasattr(self, '_sync_thread') and self._sync_thread and self._sync_thread.isRunning():
+            self._sync_thread.quit()
+            self._sync_thread.wait(1000)
+        if hasattr(self, '_push_thread') and self._push_thread and self._push_thread.isRunning():
+            self._push_thread.quit()
+            self._push_thread.wait(1000)
         if hasattr(self, '_clone_thread') and self._clone_thread and self._clone_thread.isRunning():
             if hasattr(self._clone_thread, 'cancel'):
                 self._clone_thread.cancel()

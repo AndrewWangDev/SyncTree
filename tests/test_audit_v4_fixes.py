@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 from PySide6.QtWidgets import QApplication
 
 from core.i18n import lang_manager
-from core.git_utils import GitPoller
+from core.git_utils import GitPoller, normalize_repo_path
 from core.state import GitState
 from ui.window import MainWindow
 
@@ -84,11 +84,11 @@ def test_git_rename_and_copy_status_parsing():
             assert state.fileStatuses["docs/new manual.md"] == "staged"
             
             # 绝对路径也必须映射
-            abs_new = os.path.realpath(os.path.join(tmp_dir, "new.txt")).replace('\\', '/').lower()
+            abs_new = normalize_repo_path(os.path.join(tmp_dir, "new.txt"))
             assert state.fileStatuses.get(abs_new) == "staged"
             
             # docs 目录必须冒泡为 staged
-            abs_docs = os.path.realpath(os.path.join(tmp_dir, "docs")).replace('\\', '/').lower()
+            abs_docs = normalize_repo_path(os.path.join(tmp_dir, "docs"))
             assert state.dirStatuses.get(abs_docs) == "staged"
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)

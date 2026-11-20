@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication
 app = QApplication.instance() or QApplication([])
 
 from core.state import GitState
-from core.git_utils import GitPoller
+from core.git_utils import GitPoller, normalize_repo_path
 from ui.graph_view import git_ansi_to_html
 from ui.panel_view import PanelView
 from ui.components.toast import ToastLabel
@@ -118,7 +118,7 @@ def test_file_tree_folder_status_bubbling():
         window.poller.wait()
         window.poller.repo_path = tmp_dir
         
-        deep_key = os.path.realpath(deep_file).replace('\\', '/').lower()
+        deep_key = normalize_repo_path(deep_file)
         state = GitState(
             isRepo=True,
             fileStatuses={

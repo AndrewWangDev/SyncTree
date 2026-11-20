@@ -6,11 +6,18 @@ import sys
 import shutil
 import subprocess
 import webbrowser
+import re
 
 from ui.components.buttons import MaterialButton
 from ui.theme import COLORS
 from core.i18n import tr, lang_manager
 from core.config import load_config, save_config
+
+def mask_remote_url(url: str) -> str:
+    """脱敏隐藏 URL 中嵌入的密码或 Token（如 https://ghp_xxx@github.com）"""
+    if not url:
+        return ""
+    return re.sub(r'(https?://)([^:@/]+):?([^@/]+)?@', r'\1***@', url)
 
 class PanelView(QWidget):
     # Signals for core actions
@@ -50,7 +57,8 @@ class PanelView(QWidget):
         # Remote URL
         self.lbl_remote = QLabel(tr("remote_repo"))
         self.lbl_remote.setStyleSheet(f"color: {COLORS['text_disabled']};")
-        self.line_remote = QLineEdit(self.config.get("remote_url", ""))
+        self._raw_remote_url = self.config.get("remote_url", "")
+        self.line_remote = QLineEdit(mask_remote_url(self._raw_remote_url))
         self.line_remote.editingFinished.connect(self._save_remote_url)
         
         action_layout_remote = QHBoxLayout()
@@ -81,9 +89,12 @@ class PanelView(QWidget):
         self.btn_preview.clicked.connect(self._preview_project)
         self.btn_terminal = MaterialButton(tr("open_terminal"))
         self.btn_terminal.clicked.connect(self._open_terminal)
+        self.btn_cleanup = MaterialButton(tr("cleanup_garbage"))
+        self.btn_cleanup.clicked.connect(lambda: self.action_requested.emit("cleanup", {}))
         
         action_layout.addWidget(self.btn_preview)
         action_layout.addWidget(self.btn_terminal)
+        action_layout.addWidget(self.btn_cleanup)
         
         grid.addWidget(self.lbl_project, 2, 0)
         grid.addWidget(self.line_project, 2, 1)
@@ -136,9 +147,15 @@ class PanelView(QWidget):
         
         self.btn_push = MaterialButton(tr("push"), is_primary=True)
         self.btn_push.clicked.connect(lambda: self.action_requested.emit("push", {}))
+
+        self.btn_abort_merge = MaterialButton(tr("abort_merge"))
+        self.btn_abort_merge.setStyleSheet(f"QPushButton {{ background-color: {COLORS['error']}; color: white; }}")
+        self.btn_abort_merge.clicked.connect(lambda: self.action_requested.emit("abort_merge", {}))
+        self.btn_abort_merge.setVisible(False)
         
         row3.addWidget(self.btn_undo)
         row3.addWidget(self.btn_push)
+        row3.addWidget(self.btn_abort_merge)
         pipe_layout.addLayout(row3)
         
         self.layout.addWidget(pipe_widget)
@@ -157,6 +174,8 @@ class PanelView(QWidget):
         self.btn_preview.setText(tr("preview_project"))
         self.btn_terminal.setText(tr("open_terminal"))
         
+        self.btn_cleanup.setText(tr("cleanup_garbage"))
+        self.btn_abort_merge.setText(tr("abort_merge"))
         self.btn_sync.setText(tr("sync_latest"))
         self.btn_task.setText(tr("start_task"))
         self.btn_history.setText(tr("branch_history"))
@@ -176,11 +195,14 @@ class PanelView(QWidget):
             self.action_requested.emit("change_repo", {"path": folder})
 
     def _save_remote_url(self):
-        url = self.line_remote.text().strip()
-        self.config["remote_url"] = url
+        text = self.line_remote.text().strip()
+        if "***@" not in text:
+            self._raw_remote_url = text
+        self.config["remote_url"] = getattr(self, "_raw_remote_url", text)
         save_config(self.config)
-        if url:
-            self.action_requested.emit("set_remote", {"url": url})
+        self.line_remote.setText(mask_remote_url(self.config["remote_url"]))
+        if self.config["remote_url"]:
+            self.action_requested.emit("set_remote", {"url": self.config["remote_url"]})
             
     def _save_project_url(self):
         url = self.line_project.text().strip()
@@ -215,6 +237,7 @@ class PanelView(QWidget):
                     self.action_requested.emit("terminal_error", {"msg": "No supported terminal emulator found."})
 
     def _clear_remote_url(self):
+        self._raw_remote_url = ""
         self.line_remote.setText("")
         self.config["remote_url"] = ""
         save_config(self.config)
@@ -235,8 +258,13 @@ class PanelView(QWidget):
             self.btn_unstage.setEnabled(state.hasStaged)
             self.btn_commit.setEnabled(state.hasStaged)
             self.btn_undo.setEnabled(False)
+            self.btn_abort_merge.setVisible(True)
+            self.btn_abort_merge.setEnabled(True)
             self._update_preview_state()
             return
+
+        self.btn_abort_merge.setVisible(False)
+        self.btn_abort_merge.setEnabled(False)
 
         no_changes = not state.hasModified and not state.hasStaged
         

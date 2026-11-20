@@ -2,7 +2,7 @@ import os
 import shutil
 import tempfile
 import pytest
-from core.git_utils import GitPoller
+from core.git_utils import GitPoller, normalize_repo_path
 from core.git_actions import GitActions
 from core.state import GitState
 
@@ -46,7 +46,7 @@ def test_poll_git_state_detection(temp_repo):
     
     state = poller._poll_git()
     assert state.hasModified is True # git porcelain 状态下 ?? 会触发 hasModified
-    f1_key = os.path.realpath(f1).replace('\\', '/').lower()
+    f1_key = normalize_repo_path(f1)
     assert state.fileStatuses.get(f1_key) == "untracked"
     
     # 暂存该文件

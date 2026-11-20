@@ -3,7 +3,7 @@ import tempfile
 import pytest
 from unittest.mock import patch, MagicMock
 from core.state import GitState
-from core.git_utils import GitRepoLock
+from core.git_utils import GitRepoLock, normalize_repo_path
 from core.network_diag import EnvDiagThread
 from ui.panel_view import PanelView
 from ui.window import MainWindow
@@ -159,8 +159,8 @@ def test_folder_status_clean_when_other_folders_have_changes():
         os.makedirs(dir_clean, exist_ok=True)
 
         # 模拟 dirStatuses 包含 src 目录的修改
-        mod_key = os.path.realpath(dir_mod).replace('\\', '/').lower()
-        clean_key = os.path.realpath(dir_clean).replace('\\', '/').lower()
+        mod_key = normalize_repo_path(dir_mod)
+        clean_key = normalize_repo_path(dir_clean)
 
         state = GitState(
             isRepo=True,

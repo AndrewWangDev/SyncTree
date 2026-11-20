@@ -2,6 +2,7 @@ import webbrowser
 import re
 import subprocess
 import os
+from urllib.parse import urlparse
 from PySide6.QtCore import QThread, Signal
 from core.git_utils import GitPoller, GitRepoLock
 
@@ -9,7 +10,7 @@ class GitActions:
     def __init__(self, poller: GitPoller):
         self.poller = poller
 
-    def run_cmd(self, args, get_stderr=False):
+    def run_cmd(self, args, get_stderr=False, timeout=60):
         repo_path = self.poller.repo_path
         if not repo_path or not os.path.exists(repo_path):
             return None, "No repo"
@@ -20,16 +21,24 @@ class GitActions:
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = subprocess.SW_HIDE
 
+        # 注入非交互环境变量，防止凭据弹窗挂死子进程
+        env = dict(os.environ)
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["GIT_PAGER"] = "cat"
+
         # 获取全局仓库锁，排他执行前台命令
         GitRepoLock.lock()
         try:
             result = subprocess.run(
                 ["git", "--no-pager"] + args,
                 cwd=repo_path,
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
                 errors='replace',
+                env=env,
+                timeout=timeout,
                 startupinfo=startupinfo
             )
             self.poller.trigger_update()
@@ -40,6 +49,8 @@ class GitActions:
             if get_stderr:
                 return result.stdout.strip(), result.stderr.strip()
             return result.stdout.strip(), None
+        except subprocess.TimeoutExpired:
+            return None, f"Command timed out after {timeout} seconds."
         except Exception as e:
             return None, str(e)
         finally:
@@ -117,6 +128,10 @@ class GitActions:
             return self.run_cmd(["update-ref", "-d", "HEAD"])
         return self.run_cmd(["reset", "--soft", "HEAD^"])
 
+    def abort_merge(self):
+        """中止当前的冲突合并状态并安全复原工作区"""
+        return self.run_cmd(["merge", "--abort"])
+
     def push(self, branch):
         remotes = self.get_remotes()
         remote_name = "origin" if "origin" in remotes else (remotes[0] if remotes else "origin")
@@ -124,13 +139,27 @@ class GitActions:
         if out is None:
             return None, err
         output = (out or "") + "\n" + (err or "")
-        match = re.search(r'https?://[^\s]+/(?:pull/new|merge_requests/new)[^\s]*', output)
+        # 预先剥离所有 ANSI 终端转义码
+        clean_output = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', output)
+        match = re.search(r'https?://[^\s]+/(?:pull/new|merge_requests/new)[^\s]*', clean_output)
         if match:
             url = re.sub(r'[.,);"\']+$', '', match.group(0))
+            parsed = urlparse(url)
+            allowed_hosts = {"github.com", "gitlab.com", "gitee.com"}
             try:
-                webbrowser.open(url)
+                remote_out, _ = self.run_cmd(["remote", "get-url", remote_name])
+                if remote_out:
+                    r_host = urlparse(remote_out.strip()).hostname
+                    if r_host:
+                        allowed_hosts.add(r_host.lower())
             except Exception:
                 pass
+
+            if parsed.hostname and parsed.hostname.lower() in allowed_hosts:
+                try:
+                    webbrowser.open(url)
+                except Exception:
+                    pass
         return out, None
 
     def diff_file(self, file_path, staged=False):
@@ -162,3 +191,22 @@ class CleanupThread(QThread):
     def run(self):
         out, err = self.actions.cleanup_garbage()
         self.finished.emit(out or "", err or "")
+
+class GitTaskThread(QThread):
+    task_done = Signal(bool, str, str)  # is_success, stdout, stderr
+
+    def __init__(self, task_func, *args, parent=None):
+        super().__init__(parent)
+        self.task_func = task_func
+        self.args = args
+
+    def run(self):
+        try:
+            res = self.task_func(*self.args)
+            if isinstance(res, tuple) and len(res) >= 2:
+                out, err = res[0], res[1]
+                self.task_done.emit(err is None, out or "", err or "")
+            else:
+                self.task_done.emit(True, str(res or ""), "")
+        except Exception as e:
+            self.task_done.emit(False, "", str(e))

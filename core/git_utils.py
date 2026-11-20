@@ -1,5 +1,6 @@
 import subprocess
 import os
+import sys
 import re
 from PySide6.QtCore import QThread, Signal, QFileSystemWatcher, QMutex, QMutexLocker
 from core.state import GitState
@@ -29,6 +30,15 @@ class GitRepoLock:
     @classmethod
     def is_locked(cls) -> bool:
         return cls._locked
+
+def normalize_repo_path(path: str) -> str:
+    """统一转换为正斜杠；在 Windows 与 macOS（默认不区分大小写）折叠小写，在 Linux 下保留原始大小写"""
+    if not path:
+        return ""
+    real = os.path.realpath(path).replace('\\', '/')
+    if os.name == 'nt' or sys.platform == 'darwin':
+        return real.lower()
+    return real
 
 class GitPoller(QThread):
     state_updated = Signal(GitState)
@@ -95,7 +105,6 @@ class GitPoller(QThread):
                 if not self._is_running or self.force_refresh:
                     break
                 self.msleep(100)
-            self.force_refresh = False
 
     def trigger_update(self):
         self.force_refresh = True
@@ -103,7 +112,7 @@ class GitPoller(QThread):
     def stop(self):
         self._is_running = False
 
-    def _run_git(self, args):
+    def _run_git(self, args, timeout=15):
         if not self.repo_path or not os.path.exists(self.repo_path):
             return ""
         
@@ -113,14 +122,21 @@ class GitPoller(QThread):
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = subprocess.SW_HIDE
 
+        env = dict(os.environ)
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["GIT_PAGER"] = "cat"
+
         try:
             result = subprocess.run(
                 ["git", "--no-pager"] + args,
                 cwd=self.repo_path,
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
                 errors='replace',
+                env=env,
+                timeout=timeout,
                 startupinfo=startupinfo
             )
             return result.stdout.rstrip()
@@ -137,15 +153,19 @@ class GitPoller(QThread):
             if not self.repo_path or not os.path.exists(self.repo_path):
                 return state
 
-            # 跨线程安全发射 watcher 需要监听的路径
+            # 跨线程安全发射 watcher 需要监听的路径（支持普通 .git 目录、Worktree 及 Submodule）
             watch_paths = [self.repo_path]
-            git_path = os.path.join(self.repo_path, ".git")
-            if os.path.exists(git_path):
-                watch_paths.append(git_path)
-                for sub in ["index", "HEAD"]:
-                    p = os.path.join(git_path, sub)
-                    if os.path.exists(p):
-                        watch_paths.append(p)
+            git_dir_raw = self._run_git(["rev-parse", "--git-dir"])
+            if git_dir_raw:
+                real_git_dir = os.path.realpath(
+                    os.path.join(self.repo_path, git_dir_raw) if not os.path.isabs(git_dir_raw) else git_dir_raw
+                )
+                if os.path.exists(real_git_dir):
+                    watch_paths.append(real_git_dir)
+                    for sub in ["index", "HEAD"]:
+                        p = os.path.join(real_git_dir, sub)
+                        if os.path.exists(p):
+                            watch_paths.append(p)
             self._update_watcher_paths.emit(watch_paths)
 
             # 检查是否在 git 工作区
@@ -167,7 +187,7 @@ class GitPoller(QThread):
             priority_val = {'conflicted': 4, 'unstaged': 3, 'staged': 2, 'untracked': 1}
             conflict_codes = {'DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'}
 
-            repo_real = os.path.realpath(self.repo_path).replace('\\', '/').lower()
+            repo_real = normalize_repo_path(self.repo_path)
 
             if status_out:
                 for line in status_out.splitlines():
@@ -175,14 +195,17 @@ class GitPoller(QThread):
                         continue
                     code = line[0:2]
                     raw_path = line[3:].strip()
-                    if " -> " in raw_path:
-                        _, new_part = raw_path.split(" -> ", 1)
-                        rel_path = new_part.strip().strip('"')
+                    # 仅在明确为重命名或拷贝状态时提取新文件路径，避免普通带箭头文件名被截断
+                    if code[0] in ('R', 'C') and " -> " in raw_path:
+                        parts = raw_path.split(" -> ")
+                        rel_path = parts[-1].strip().strip('"')
                     else:
                         rel_path = raw_path.strip().strip('"')
                     
-                    abs_path = os.path.realpath(os.path.join(self.repo_path, rel_path)).replace('\\', '/').lower()
-                    rel_key = rel_path.replace('\\', '/').lower().strip('/')
+                    abs_path = normalize_repo_path(os.path.join(self.repo_path, rel_path))
+                    rel_key = rel_path.replace('\\', '/').strip('/')
+                    if os.name == 'nt' or sys.platform == 'darwin':
+                        rel_key = rel_key.lower()
 
                     # 1. 冲突状态判定
                     if code in conflict_codes:
@@ -217,7 +240,7 @@ class GitPoller(QThread):
                     if p_val > 0:
                         curr = abs_path
                         while len(curr) > len(repo_real):
-                            curr = os.path.dirname(curr).replace('\\', '/').lower()
+                            curr = normalize_repo_path(os.path.dirname(curr))
                             if curr not in dir_priority_map or p_val > dir_priority_map[curr][0]:
                                 dir_priority_map[curr] = (p_val, status)
             

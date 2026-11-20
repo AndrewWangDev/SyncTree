@@ -131,6 +131,14 @@ i18n_dict = {
         "executable_blocked_warning": "为保障安全，禁止直接从客户端执行脚本或二进制可执行文件！",
         "switched_to": "已切换到分支",
         "clone_dir_ambiguous": "克隆完成但目标目录不确定",
+        "abort_merge": "放弃合并",
+        "abort_merge_confirm": "您确定要放弃当前的合并操作吗？未提交的合并内容将全部撤销并复原工作区。",
+        "abort_merge_success": "成功：已放弃合并，工作区已复原",
+        "cleanup_garbage": "清理垃圾",
+        "remote_has_new_commits": "远程存在新提交，本地历史落后。请先点击【同步】拉取最新代码后再推送。",
+        "auth_failed_guide": "Git 认证失败，请检查远程仓库权限或 SSH 密钥配置。",
+        "syncing": "正在同步最新代码，请稍候...",
+        "pushing": "正在推送到远程仓库，请稍候...",
     },
     "en": {
         "sync_latest": "Sync Latest Code",
@@ -263,6 +271,14 @@ i18n_dict = {
         "executable_blocked_warning": "Direct execution of scripts or binary executable files is blocked for security reasons!",
         "switched_to": "Switched to branch",
         "clone_dir_ambiguous": "Clone completed but destination directory ambiguous",
+        "abort_merge": "Abort Merge",
+        "abort_merge_confirm": "Are you sure you want to abort the current merge? All unresolved merge changes will be discarded.",
+        "abort_merge_success": "Success: Merge aborted and workspace restored",
+        "cleanup_garbage": "Cleanup",
+        "remote_has_new_commits": "Remote repository has new commits. Please Sync (Pull) before pushing.",
+        "auth_failed_guide": "Git authentication failed. Please verify credentials or SSH keys.",
+        "syncing": "Syncing latest code, please wait...",
+        "pushing": "Pushing to remote repository, please wait...",
     }
 }
 

@@ -4,7 +4,7 @@
   
   <p>
     <a href="https://github.com/AndrewWangDev/SyncTree/actions"><img src="https://img.shields.io/badge/Tests-Passing-success?style=flat-square&logo=github-actions" alt="Tests"></a>
-    <a href="https://github.com/AndrewWangDev/SyncTree"><img src="https://img.shields.io/badge/Coverage-92%25-brightgreen?style=flat-square&logo=codecov" alt="Code Coverage"></a>
+    <a href="https://github.com/AndrewWangDev/SyncTree/actions"><img src="https://img.shields.io/badge/CI-Passing-success?style=flat-square&logo=github-actions" alt="CI Status"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--2.0-blue.svg?style=flat-square" alt="License"></a>
     <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10+-blue.svg?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
   </p>

@@ -46,7 +46,7 @@ class EnvDiagThread(QThread):
         creation = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         try:
             res = subprocess.run(
-                ["ssh", "-T", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "git@github.com"], 
+                ["ssh", "-T", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "git@github.com"], 
                 capture_output=True, 
                 text=True, 
                 creationflags=creation,
